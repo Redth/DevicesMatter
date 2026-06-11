@@ -40,6 +40,38 @@ public static class ReadInteraction
         return w.ToArray();
     }
 
+    /// <summary>One decoded attribute report: its path and value (decoded from the TLV data element).</summary>
+    public sealed record ReportedAttribute(AttributePath Path, object? Value);
+
+    /// <summary>Parses a ReportData message into its attribute path/value pairs (controller/test side).</summary>
+    public static IReadOnlyList<ReportedAttribute> DecodeReport(ReadOnlySpan<byte> tlv)
+    {
+        var results = new List<ReportedAttribute>();
+        var r = new TlvReader(tlv);
+        if (!r.Read() || !r.IsContainer) throw new FormatException("ReportData: expected a struct.");
+        r.EnterContainer((ref TlvReader f) =>
+        {
+            if (f.TagNumber != TagAttributeReports || !f.IsContainer) return;
+            f.EnterContainer((ref TlvReader reportIb) =>
+            {
+                if (!reportIb.IsContainer) return;
+                reportIb.EnterContainer((ref TlvReader dataIb) =>
+                {
+                    if (dataIb.TagNumber != TagAttributeData || !dataIb.IsContainer) return;
+                    AttributePath path = default;
+                    object? value = null;
+                    dataIb.EnterContainer((ref TlvReader g) =>
+                    {
+                        if (g.TagNumber == TagPath && g.IsContainer) path = AttributePath.Read(ref g);
+                        else if (g.TagNumber == TagData) value = InteractionDispatcher.ReadValue(ref g);
+                    });
+                    results.Add(new ReportedAttribute(path, value));
+                });
+            });
+        });
+        return results;
+    }
+
     /// <summary>Parses a ReadRequest, returning the requested attribute paths.</summary>
     public static IReadOnlyList<AttributePath> DecodeRequest(ReadOnlySpan<byte> tlv)
     {

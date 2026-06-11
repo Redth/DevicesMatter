@@ -75,4 +75,20 @@ public sealed class InteractionDispatcher(Node node)
             default: throw new NotSupportedException($"No TLV encoding for attribute type {value.GetType()}.");
         }
     }
+
+    /// <summary>Decodes a TLV data element to a CLR value (inverse of <see cref="WriteValue"/>).</summary>
+    public static object? ReadValue(ref TlvReader r) => r.ElementType switch
+    {
+        TlvElementType.Null => null,
+        TlvElementType.BooleanTrue or TlvElementType.BooleanFalse => r.GetBool(),
+        TlvElementType.UnsignedInt1 or TlvElementType.UnsignedInt2
+            or TlvElementType.UnsignedInt4 or TlvElementType.UnsignedInt8 => r.GetUInt(),
+        TlvElementType.SignedInt1 or TlvElementType.SignedInt2
+            or TlvElementType.SignedInt4 or TlvElementType.SignedInt8 => r.GetInt(),
+        TlvElementType.Utf8String1 or TlvElementType.Utf8String2
+            or TlvElementType.Utf8String4 => r.GetString(),
+        TlvElementType.ByteString1 or TlvElementType.ByteString2
+            or TlvElementType.ByteString4 => r.GetBytes().ToArray(),
+        _ => throw new NotSupportedException($"No CLR decoding for TLV element {r.ElementType}."),
+    };
 }
