@@ -6,9 +6,32 @@ A pure-C#/.NET implementation of the **device / bridge side** of the
 Alexa, and Home Assistant can commission and control directly over IP, with **no HomeBridge and no
 C++/Node sidecar**.
 
-> **Status: research + spike.** This repo starts as a feasibility investigation and a minimal
-> proof-of-concept. See [`BRIEF.md`](BRIEF.md) for the full mission, what's already known, and the
-> scope of the first pass.
+> **Status: research + spike complete — GO.** The hardest piece (PASE/SPAKE2+ commissioning crypto) is
+> implemented and **proven byte-exact against the official CHIP test vectors**, and a **full PASE
+> handshake completes over real UDP sockets**. See [`docs/00-feasibility.md`](docs/00-feasibility.md)
+> for the verdict, the subsystem work-map, and the roadmap; [`BRIEF.md`](BRIEF.md) for the original
+> mission.
+
+## What works today (spike)
+
+- **Matter TLV** codec (`MatterDevice.Core/Tlv`)
+- **SPAKE2+** over P-256 in the Matter convention — proven against CHIP `SPAKE2P_RFC_test_vectors.h`
+- **Message framing** (unsecured session) + **PASE** (PBKDFParamRequest…Pake3, StatusReport)
+- **Full PASE handshake** end-to-end: device + commissioner derive identical session keys, in-process
+  and over **loopback UDP**
+- **Onboarding payload** — QR (Base38) + manual pairing code (Verhoeff), pinned to CHIP vectors
+- **mDNS** commissionable advertising (`_matterc._udp`, `_L`/`_S` subtypes, SRV/TXT) — announces live
+- **`ThermostatNode` sample** — advertises over IP, prints the QR + manual code, runs PASE on UDP 5540
+
+Not yet: post-PASE encryption (AES-CCM), CASE, the Interaction Model, the cluster library, attestation —
+see the feasibility doc's roadmap.
+
+## Build / test / run
+
+```bash
+dotnet test                                   # 17 tests: SPAKE2+ KAT, PASE, setup payload, framing, mDNS
+dotnet run --project samples/ThermostatNode   # advertise + accept commissioning (Ctrl+C to stop)
+```
 
 ## Why this exists
 
