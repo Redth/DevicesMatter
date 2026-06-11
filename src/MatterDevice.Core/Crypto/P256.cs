@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 
 namespace MatterDevice.Core.Crypto;
 
@@ -61,14 +62,39 @@ public sealed class P256KeyPair
     /// <summary>Signs <paramref name="message"/> (SHA-256 + ECDSA), returning the raw 64-byte r‖s signature.</summary>
     public byte[] Sign(ReadOnlySpan<byte> message)
     {
-        using var ec = ECDsa.Create(new ECParameters
-        {
-            Curve = ECCurve.NamedCurves.nistP256,
-            D = PrivateKey,
-            Q = PointFromUncompressed(PublicKey),
-        });
+        using var ec = CreateEcDsa();
         return ec.SignData(message.ToArray(), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
     }
+
+    /// <summary>A DER-encoded PKCS#10 CertificationRequest for this key (the device's operational CSR).</summary>
+    public byte[] CreateCsr()
+    {
+        using var ec = CreateEcDsa();
+        var request = new CertificateRequest("CN=Matter Operational", ec, HashAlgorithmName.SHA256);
+        return request.CreateSigningRequest();
+    }
+
+    /// <summary>Extracts the 65-byte uncompressed public key from a DER-encoded PKCS#10 CSR.</summary>
+    public static byte[] PublicKeyFromCsr(byte[] csrDer)
+    {
+        var request = CertificateRequest.LoadSigningRequest(
+            csrDer, HashAlgorithmName.SHA256, signerSignaturePadding: System.Security.Cryptography.RSASignaturePadding.Pkcs1);
+        using var ec = request.PublicKey.GetECDsaPublicKey()
+                       ?? throw new InvalidOperationException("CSR does not carry an EC public key.");
+        var p = ec.ExportParameters(false);
+        var output = new byte[65];
+        output[0] = 0x04;
+        LeftPad(p.Q.X!, 32).CopyTo(output, 1);
+        LeftPad(p.Q.Y!, 32).CopyTo(output, 33);
+        return output;
+    }
+
+    private ECDsa CreateEcDsa() => ECDsa.Create(new ECParameters
+    {
+        Curve = ECCurve.NamedCurves.nistP256,
+        D = PrivateKey,
+        Q = PointFromUncompressed(PublicKey),
+    });
 
     private static byte[] Uncompressed(ECPoint q)
     {

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using MatterDevice.Core.Credentials;
 using MatterDevice.Core.Crypto;
 using MatterDevice.Core.Session;
+using CoreOpCreds = MatterDevice.Core.Credentials.OperationalCredentials;
 
 namespace MatterDevice.Commissioning.Case;
 
@@ -94,7 +95,7 @@ public sealed class CaseResponder
         var initiatorNoc = MatterCertificate.Decode(data3.Noc);
 
         // The initiator NOC must chain to our fabric root.
-        if (!OperationalCredentials.ValidateChain(initiatorNoc, _fabric.RootCertificate, _fabric.FabricId))
+        if (!CoreOpCreds.ValidateChain(initiatorNoc, _fabric.RootCertificate, _fabric.FabricId))
             return null;
 
         // Verify the initiator's signature over TBSData3 (sender = initiator).

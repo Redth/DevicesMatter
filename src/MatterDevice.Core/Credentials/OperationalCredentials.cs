@@ -44,7 +44,15 @@ public static class OperationalCredentials
 
     /// <summary>Builds a Node Operational Certificate (NOC) signed by the root, for a node on a fabric.</summary>
     public static MatterCertificate CreateNodeCertificate(
-        P256KeyPair issuerKey, MatterCertificate issuerCert, P256KeyPair nodeKey, ulong fabricId, ulong nodeId)
+        P256KeyPair issuerKey, MatterCertificate issuerCert, P256KeyPair nodeKey, ulong fabricId, ulong nodeId) =>
+        CreateNodeCertificate(issuerKey, issuerCert, nodeKey.PublicKey, fabricId, nodeId);
+
+    /// <summary>
+    /// Builds a NOC from just the node's <b>public key</b> — what a commissioner has after a CSRResponse
+    /// (it never sees the device's operational private key).
+    /// </summary>
+    public static MatterCertificate CreateNodeCertificate(
+        P256KeyPair issuerKey, MatterCertificate issuerCert, byte[] nodePublicKey, ulong fabricId, ulong nodeId)
     {
         var subject = new MatterDistinguishedName()
             .AddMatterId(DnAttributeType.MatterNodeId, nodeId)
@@ -57,12 +65,12 @@ public static class OperationalCredentials
             Subject = subject,
             NotBefore = 0,
             NotAfter = 0,
-            EllipticCurvePublicKey = nodeKey.PublicKey,
+            EllipticCurvePublicKey = nodePublicKey,
             Extensions = new CertificateExtensions
             {
                 IsCa = false,
                 KeyUsage = (ushort)MatterKeyUsage.DigitalSignature,
-                SubjectKeyId = SubjectKeyId(nodeKey.PublicKey),
+                SubjectKeyId = SubjectKeyId(nodePublicKey),
                 AuthorityKeyId = issuerCert.Extensions.SubjectKeyId,
             },
         };
