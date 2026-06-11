@@ -36,7 +36,7 @@ public sealed class MatterMessage
     public bool IsInitiator { get; set; }
     public bool IsAck { get; set; }
     public bool RequiresAck { get; set; }
-    public ushort? AckedMessageCounter { get; set; }
+    public uint? AckedMessageCounter { get; set; }
 
     public byte Opcode { get; set; }
     public ushort ExchangeId { get; set; }
@@ -122,7 +122,7 @@ public sealed class MatterMessage
         msg.ProtocolId = (MatterProtocolId)BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(pos)); pos += 2;
         if (msg.IsAck)
         {
-            msg.AckedMessageCounter = (ushort)BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(pos)); pos += 4;
+            msg.AckedMessageCounter = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(pos)); pos += 4;
         }
 
         msg.Payload = data.Slice(pos).ToArray();

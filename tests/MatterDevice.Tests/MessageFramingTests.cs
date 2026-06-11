@@ -51,7 +51,7 @@ public class MessageFramingTests
 
         var decoded = MatterMessage.Decode(msg.Encode());
         Assert.True(decoded.IsAck);
-        Assert.Equal((ushort?)42, decoded.AckedMessageCounter);
+        Assert.Equal((uint?)42, decoded.AckedMessageCounter);
     }
 
     [Fact]
