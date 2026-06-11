@@ -6,12 +6,19 @@
 
 ## Go / no-go
 
-**GO.** Nothing in the device-side stack requires leaving managed .NET, and the single highest-risk
-piece — the **PASE/SPAKE2+ commissioning crypto** — is now **implemented and proven byte-exact against
-the official CHIP test vectors**, with a **full PASE handshake completing over real UDP sockets** in
-this spike. The remaining work is large but it is *breadth, not unknowns*: the hard cryptographic and
-wire-format risks are retired; what's left (CASE, the Interaction Model, the cluster library, message
-encryption, attestation) is well-specified plumbing that the same approach extends to.
+**GO — and now substantially built.** This document was the original spike verdict; since then the
+**entire device-side commissioning stack has been implemented and proven end-to-end** in pure .NET
+(PASE, AES-CCM, CASE, certificates, attestation, the Interaction Model, and an orchestrator that
+sequences the whole flow over UDP — 44 tests, crypto pinned to CHIP/spec known-answer vectors). See
+[`01-milestone1-progress.md`](01-milestone1-progress.md) for the current state and the remaining
+byte-level-interop items. The verdict below stands and has been borne out: nothing required leaving
+managed .NET, and the cryptographic/wire-format risks are retired.
+
+The single highest-risk piece — the **PASE/SPAKE2+ commissioning crypto** — was proven byte-exact
+against the official CHIP test vectors early; **CASE** and the **operational credential flow** followed
+the same approach and are likewise proven (full handshakes deriving identical session keys). What
+remains is byte-level interop polish (X.509-DER cert signatures, CHIP test certs, a couple of clusters,
+mDNS hardening) plus live-controller validation — *breadth, not unknowns*.
 
 The one genuine external dependency is **device attestation** for production: Apple/Google require a
 Device Attestation Certificate chaining to a CSA-approved PAA, which needs CSA membership + a real

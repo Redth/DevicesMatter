@@ -6,39 +6,36 @@ A pure-C#/.NET implementation of the **device / bridge side** of the
 Alexa, and Home Assistant can commission and control directly over IP, with **no HomeBridge and no
 C++/Node sidecar**.
 
-> **Status: research + spike complete — GO.** The hardest piece (PASE/SPAKE2+ commissioning crypto) is
-> implemented and **proven byte-exact against the official CHIP test vectors**, and a **full PASE
-> handshake completes over real UDP sockets**. See [`docs/00-feasibility.md`](docs/00-feasibility.md)
-> for the verdict, the subsystem work-map, and the roadmap; [`BRIEF.md`](BRIEF.md) for the original
-> mission.
+> **Status: the full device-side commissioning stack is built and proven end-to-end** (44 tests).
+> A commissioner can drive the whole journey — PASE → encrypted attestation/CSR/AddNOC → CASE → encrypted
+> Interaction-Model reads — through one orchestrator, in-process and over UDP. Crypto is pinned to CHIP/spec
+> known-answer vectors. What remains for byte-level interop with a live controller (the X.509-DER cert
+> signature domain, CHIP test attestation certs, a couple of clusters, mDNS hardening) is tracked in
+> [`docs/01-milestone1-progress.md`](docs/01-milestone1-progress.md). See
+> [`docs/00-feasibility.md`](docs/00-feasibility.md) for the verdict; [`BRIEF.md`](BRIEF.md) for the mission.
 
-## What works today
+## What works today (all proven end-to-end)
 
-**Spike (commissioning crypto + discovery):**
-- **Matter TLV** codec (`MatterDevice.Core/Tlv`)
-- **SPAKE2+** over P-256 in the Matter convention — proven against CHIP `SPAKE2P_RFC_test_vectors.h`
-- **Message framing** + **PASE** (PBKDFParamRequest…Pake3, StatusReport)
-- **Full PASE handshake** end-to-end: device + commissioner derive identical session keys, in-process
-  and over **loopback UDP**
-- **Onboarding payload** — QR (Base38) + manual pairing code (Verhoeff), pinned to CHIP vectors
-- **mDNS** commissionable advertising (`_matterc._udp`, `_L`/`_S` subtypes, SRV/TXT) — announces live
-- **`ThermostatNode` sample** — advertises over IP, prints the QR + manual code, runs PASE on UDP 5540
+- **TLV / framing / MRP**, **AES-CCM** secure messaging, **P-256** ECDH/ECDSA
+- **PASE / SPAKE2+** — proven against CHIP `SPAKE2P_RFC_test_vectors.h`; full handshake in-proc + UDP
+- **CASE** — Sigma1/2/3 operational session; both sides derive identical keys
+- **Fabric crypto** — compressed-fabric-id (KAT vs the spec vector) + operational IPK
+- **Matter certificates** — TLV codec (tags verified vs `CHIPCert.h`), RCAC/NOC generation + chain validation
+- **Attestation + Operational Credentials** — AttestationRequest / CSRRequest / AddTrustedRoot / AddNOC → installs a fabric
+- **Interaction Model** — Read + Invoke (with command response data) over the data model
+- **Clusters** — Basic Information, General Commissioning, Thermostat
+- **Orchestrator + transport** — `MatterDeviceNode` sequences the whole flow; `MatterUdpHost` over UDP 5540
+- **Onboarding payload** (QR + manual code, CHIP-pinned) + **mDNS** commissionable advertising
+- **`ThermostatNode` sample** — a runnable device: advertise → commission → operational
 
-**Milestone 1 progress (toward "commissions to operational"):**
-- **AES-CCM secure messaging** — proven with the real PASE-derived session keys (portable: BCL on
-  Linux/Windows, BouncyCastle on macOS)
-- **Interaction Model** — Read (ReadRequest↔ReportData, incl. wildcards) and Invoke
-  (InvokeRequest↔InvokeResponse) over the data model
-- **Commissioning clusters** — Basic Information + General Commissioning, driven through the IM
-
-Not yet: CASE, device attestation + Matter cert format, the rest of the cluster library, persistence,
-and the live chip-tool/HA validation — see [`docs/01-milestone1-progress.md`](docs/01-milestone1-progress.md).
+The capstone test commissions the device through one `ProcessDatagram` entry point as real framed/encrypted
+messages, then reads the thermostat over the operational CASE session.
 
 ## Build / test / run
 
 ```bash
-dotnet test                                   # 27 tests: SPAKE2+ KAT, PASE, AES-CCM, IM, clusters, setup payload, mDNS
-dotnet run --project samples/ThermostatNode   # advertise + accept commissioning (Ctrl+C to stop)
+dotnet test                                   # 44 tests across every layer (SPAKE2+/CASE/AES-CCM KATs, full commissioning)
+dotnet run --project samples/ThermostatNode   # a full commissionable device (Ctrl+C to stop)
 ```
 
 ## Why this exists
