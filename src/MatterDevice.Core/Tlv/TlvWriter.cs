@@ -22,6 +22,13 @@ public sealed class TlvWriter
 
     public byte[] ToArray() => _buffer.AsSpan(0, _length).ToArray();
 
+    /// <summary>Appends a complete pre-encoded TLV element (control byte ‖ tag ‖ value) verbatim.</summary>
+    public TlvWriter WriteRawElement(ReadOnlySpan<byte> preEncoded)
+    {
+        WriteRaw(preEncoded);
+        return this;
+    }
+
     // ---- containers ------------------------------------------------------
 
     public TlvWriter StartStructure(TlvTag tag) => StartContainer(tag, TlvElementType.Structure);

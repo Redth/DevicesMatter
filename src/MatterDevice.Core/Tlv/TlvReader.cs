@@ -40,6 +40,15 @@ public ref struct TlvReader
     public readonly bool IsContainer =>
         ElementType is TlvElementType.Structure or TlvElementType.Array or TlvElementType.List;
 
+    private int _currentElementStart;
+
+    /// <summary>
+    /// The full on-wire bytes of the current element (control byte, tag, value — and, for a container, its
+    /// whole body through the matching EndOfContainer). Valid after a successful <see cref="Read"/>; lets a
+    /// caller capture a nested struct verbatim (e.g. an IM command's fields).
+    /// </summary>
+    public readonly ReadOnlySpan<byte> CurrentElementSpan => _data[_currentElementStart..EndOfElement(_currentElementStart)];
+
     /// <summary>
     /// Advances to the next element at the current level. Returns false at end of data or when an
     /// EndOfContainer marker is reached (which is consumed).
@@ -49,6 +58,7 @@ public ref struct TlvReader
         if (_pos >= _data.Length)
             return false;
 
+        _currentElementStart = _pos;
         var control = _data[_pos++];
         var tagControl = (TlvTagControl)(control & 0xE0);
         ElementType = (TlvElementType)(control & 0x1F);
@@ -168,7 +178,7 @@ public ref struct TlvReader
     }
 
     /// <summary>Returns the index just past the complete element (incl. nested containers) starting at <paramref name="start"/>.</summary>
-    private int EndOfElement(int start)
+    private readonly int EndOfElement(int start)
     {
         var p = start;
         var control = _data[p++];
@@ -204,7 +214,7 @@ public ref struct TlvReader
     };
 
     /// <summary>Bytes consumed by a non-container element's value at <paramref name="pos"/> (including any length prefix).</summary>
-    private int ValueLengthBytesAt(int pos, TlvElementType type) => type switch
+    private readonly int ValueLengthBytesAt(int pos, TlvElementType type) => type switch
     {
         TlvElementType.SignedInt1 or TlvElementType.UnsignedInt1 => 1,
         TlvElementType.SignedInt2 or TlvElementType.UnsignedInt2 => 2,

@@ -5,8 +5,18 @@ namespace MatterDevice.DataModel.InteractionModel;
 /// <summary>One invoked command: its path and the raw TLV bytes of its command fields (if any).</summary>
 public sealed record InvokedCommand(CommandPath Path, byte[]? FieldsTlv);
 
-/// <summary>The result of executing a command: a status (and optionally response command data — not yet modeled).</summary>
-public sealed record CommandResult(CommandPath Path, ImStatus Status);
+/// <summary>
+/// The result of executing a command. Either a plain status, or a response command (a command back to the
+/// initiator carrying response fields, e.g. AttestationResponse) identified by <see cref="ResponseCommandId"/>
+/// with <see cref="WriteResponseFields"/> emitting its TLV members.
+/// </summary>
+public sealed record CommandResult(CommandPath Path, ImStatus Status)
+{
+    public uint? ResponseCommandId { get; init; }
+    public Action<MatterDevice.Core.Tlv.TlvWriter>? WriteResponseFields { get; init; }
+
+    public bool HasResponseData => ResponseCommandId is not null && WriteResponseFields is not null;
+}
 
 /// <summary>
 /// InvokeRequest / InvokeResponse codecs (Matter Core Spec §10.7, §8.8–8.9). For the skeleton, a response
@@ -28,9 +38,23 @@ public static class InvokeInteraction
 
     // InvokeResponseIB / CommandStatusIB / StatusIB tags
     private const int TagStatus = 0;          // InvokeResponseIB → CommandStatusIB
+    private const int TagCommandData = 1;     // InvokeResponseIB → CommandDataIB (response with fields)
     private const int TagCsCommandPath = 0;   // CommandStatusIB → CommandPathIB
     private const int TagCsStatus = 1;        // CommandStatusIB → StatusIB
     private const int TagStatusCode = 0;      // StatusIB → Status
+
+    /// <summary>
+    /// Builds a CommandFields element (a structure under context tag 1) from a member writer — the
+    /// pre-encoded value to put in <see cref="InvokedCommand.FieldsTlv"/>.
+    /// </summary>
+    public static byte[] EncodeCommandFields(Action<TlvWriter> writeMembers)
+    {
+        var w = new TlvWriter();
+        w.StartStructure(TlvTag.ContextSpecific(TagCommandFields));
+        writeMembers(w);
+        w.EndContainer();
+        return w.ToArray();
+    }
 
     /// <summary>Builds an InvokeRequest for the given commands (controller/test side).</summary>
     public static byte[] EncodeRequest(IReadOnlyList<InvokedCommand> commands, bool suppressResponse = false, bool timed = false)
@@ -45,11 +69,7 @@ public static class InvokeInteraction
             w.StartStructure(TlvTag.Anonymous);                         // CommandDataIB
             c.Path.Write(w, TlvTag.ContextSpecific(TagCommandPath));
             if (c.FieldsTlv is { } fields)
-            {
-                w.StartStructure(TlvTag.ContextSpecific(TagCommandFields));
-                // (raw fields are not re-expanded in the skeleton)
-                w.EndContainer();
-            }
+                w.WriteRawElement(fields);                              // pre-encoded CommandFields (context tag 1)
             w.EndContainer();                                           // CommandDataIB
         }
         w.EndContainer();
@@ -78,7 +98,7 @@ public static class InvokeInteraction
                         if (g.TagNumber == TagCommandPath && g.IsContainer)
                             path = CommandPath.Read(ref g);
                         else if (g.TagNumber == TagCommandFields)
-                            fields = g.IsContainer ? null : g.GetBytes().ToArray(); // struct fields left raw for the skeleton
+                            fields = g.CurrentElementSpan.ToArray(); // capture the fields struct verbatim
                     });
                     if (path is { } p)
                         commands.Add(new InvokedCommand(p, fields));
@@ -99,12 +119,26 @@ public static class InvokeInteraction
         foreach (var res in results)
         {
             w.StartStructure(TlvTag.Anonymous);                          // InvokeResponseIB
-            w.StartStructure(TlvTag.ContextSpecific(TagStatus));         // CommandStatusIB
-            res.Path.Write(w, TlvTag.ContextSpecific(TagCsCommandPath));
-            w.StartStructure(TlvTag.ContextSpecific(TagCsStatus));       // StatusIB
-            w.WriteUInt(TlvTag.ContextSpecific(TagStatusCode), (byte)res.Status);
-            w.EndContainer();                                           // StatusIB
-            w.EndContainer();                                           // CommandStatusIB
+            if (res.HasResponseData)
+            {
+                // CommandDataIB { 0: CommandPathIB, 1: CommandFields }
+                w.StartStructure(TlvTag.ContextSpecific(TagCommandData));
+                new CommandPath(res.Path.Endpoint, res.Path.Cluster, res.ResponseCommandId!.Value)
+                    .Write(w, TlvTag.ContextSpecific(TagCommandPath));
+                w.StartStructure(TlvTag.ContextSpecific(TagCommandFields));
+                res.WriteResponseFields!(w);
+                w.EndContainer();
+                w.EndContainer();                                       // CommandDataIB
+            }
+            else
+            {
+                w.StartStructure(TlvTag.ContextSpecific(TagStatus));     // CommandStatusIB
+                res.Path.Write(w, TlvTag.ContextSpecific(TagCsCommandPath));
+                w.StartStructure(TlvTag.ContextSpecific(TagCsStatus));   // StatusIB
+                w.WriteUInt(TlvTag.ContextSpecific(TagStatusCode), (byte)res.Status);
+                w.EndContainer();                                       // StatusIB
+                w.EndContainer();                                       // CommandStatusIB
+            }
             w.EndContainer();                                           // InvokeResponseIB
         }
         w.EndContainer();                                               // InvokeResponses array

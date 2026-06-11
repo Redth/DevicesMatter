@@ -5,6 +5,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MatterDevice.Core\MatterDevice.Core.csproj" />
+    <ProjectReference Include="..\MatterDevice.DataModel\MatterDevice.DataModel.csproj" />
   </ItemGroup>
 
   <ItemGroup>
