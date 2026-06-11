@@ -69,6 +69,19 @@ public sealed class Spake2Plus
         return (To32(w0), To32(w1));
     }
 
+    /// <summary>A uniformly random SPAKE2+ scalar in [1, n−1], as a 32-byte big-endian value.</summary>
+    public static byte[] RandomScalar()
+    {
+        while (true)
+        {
+            var candidate = new byte[32];
+            RandomNumberGenerator.Fill(candidate);
+            var s = new BigInteger(1, candidate).Mod(Curve.N);
+            if (s.SignValue != 0)
+                return To32(s);
+        }
+    }
+
     /// <summary>The verifier point <c>L = w1·P</c> (65-byte uncompressed), what a device stores instead of w1.</summary>
     public byte[] ComputeL(ReadOnlySpan<byte> w1) =>
         Curve.G.Multiply(ToScalar(w1)).Normalize().GetEncoded(false);
@@ -102,6 +115,20 @@ public sealed class Spake2Plus
         var w0M = _m.Multiply(ToScalar(w0));
         var z = bigX.Subtract(w0M).Multiply(yScalar).Normalize().GetEncoded(false);
         var v = bigL.Multiply(yScalar).Normalize().GetEncoded(false);
+        return (z, v);
+    }
+
+    /// <summary>
+    /// Prover (commissioner) shared values from the verifier's share Y: <c>Z = x·(Y − w0·N)</c> and
+    /// <c>V = w1·(Y − w0·N)</c>. Provided for a controller / test harness (the mirror of
+    /// <see cref="ComputeVerifierZV"/>). Both returned as 65-byte uncompressed points.
+    /// </summary>
+    public (byte[] Z, byte[] V) ComputeProverZV(ReadOnlySpan<byte> x, ReadOnlySpan<byte> w1, ReadOnlySpan<byte> y65, ReadOnlySpan<byte> w0)
+    {
+        var bigY = DecodePoint(y65.ToArray());
+        var yMinusW0N = bigY.Subtract(_n.Multiply(ToScalar(w0)));
+        var z = yMinusW0N.Multiply(ToScalar(x)).Normalize().GetEncoded(false);
+        var v = yMinusW0N.Multiply(ToScalar(w1)).Normalize().GetEncoded(false);
         return (z, v);
     }
 
@@ -167,6 +194,19 @@ public sealed class Spake2Plus
     /// <summary>A SPAKE2+ confirmation MAC: <c>HMAC-SHA256(key, peerShare)</c>.</summary>
     public static byte[] ConfirmationMac(ReadOnlySpan<byte> key, ReadOnlySpan<byte> peerShare) =>
         HMACSHA256.HashData(key, peerShare);
+
+    /// <summary>
+    /// The post-PASE session keys: <c>HKDF-SHA256(Ke, salt=∅, info="SessionKeys", 48)</c> split into
+    /// three 16-byte keys — Initiator→Responder, Responder→Initiator, and the Attestation Challenge.
+    /// The device decrypts inbound with I2R and encrypts outbound with R2I.
+    /// </summary>
+    public static (byte[] I2R, byte[] R2I, byte[] AttestationChallenge) DeriveSessionKeys(ReadOnlySpan<byte> ke)
+    {
+        Span<byte> keys = stackalloc byte[48];
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, ke, keys,
+            salt: ReadOnlySpan<byte>.Empty, info: "SessionKeys"u8);
+        return (keys[..16].ToArray(), keys[16..32].ToArray(), keys[32..48].ToArray());
+    }
 
     // ---- helpers ---------------------------------------------------------
 

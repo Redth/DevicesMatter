@@ -137,53 +137,59 @@ public ref struct TlvReader
     // ---- container navigation -------------------------------------------
 
     /// <summary>
-    /// Reads the current container's immediate <b>leaf</b> children, invoking <paramref name="onField"/>
-    /// for each. Nested containers are skipped whole (the spike's messages never need to descend into an
-    /// optional sub-struct such as session parameters). The reader must currently sit on a container
-    /// element just returned by <see cref="Read"/>; afterwards it is positioned past the container.
+    /// Reads the current container's immediate children, invoking <paramref name="onField"/> for each
+    /// (containers included — the handler checks <see cref="IsContainer"/> and may itself call
+    /// <see cref="EnterContainer"/> on a child). The position of the next sibling is computed up front, so
+    /// the iteration is correct whether or not the handler descends into a child. The reader must
+    /// currently sit on a container element just returned by <see cref="Read"/>; afterwards it is
+    /// positioned past the container.
     /// </summary>
     public void EnterContainer(ReadFieldDelegate onField)
     {
         if (!IsContainer)
             throw new InvalidOperationException("Current element is not a container.");
 
-        var child = new TlvReader(_data) { _pos = _pos };
-        while (child.Read())
+        var pos = _pos; // first child element
+        while (pos < _data.Length)
         {
-            if (child.IsContainer)
-                child.SkipContainerBody();
-            else
-                onField(ref child);
+            if ((TlvElementType)(_data[pos] & 0x1F) == TlvElementType.EndOfContainer)
+            {
+                pos++; // consume the marker
+                break;
+            }
+
+            var next = EndOfElement(pos);          // where the next sibling starts, handler-independent
+            var child = new TlvReader(_data) { _pos = pos };
+            child.Read();
+            onField(ref child);
+            pos = next;
         }
-        _pos = child._pos;
+        _pos = pos;
     }
 
-    /// <summary>
-    /// Skips the body of the container the reader just entered (its header element was already read),
-    /// consuming through the matching EndOfContainer, honoring nesting.
-    /// </summary>
-    private void SkipContainerBody()
+    /// <summary>Returns the index just past the complete element (incl. nested containers) starting at <paramref name="start"/>.</summary>
+    private int EndOfElement(int start)
     {
-        var depth = 1;
-        while (depth > 0)
+        var p = start;
+        var control = _data[p++];
+        var type = (TlvElementType)(control & 0x1F);
+        p += TagLengthBytes((TlvTagControl)(control & 0xE0));
+        if (type is TlvElementType.Structure or TlvElementType.Array or TlvElementType.List)
         {
-            if (_pos >= _data.Length)
-                throw new InvalidOperationException("Truncated TLV: unterminated container.");
-            var control = _data[_pos++];
-            var type = (TlvElementType)(control & 0x1F);
-            if (type == TlvElementType.EndOfContainer)
+            var depth = 1;
+            while (depth > 0)
             {
-                depth--;
-                continue;
+                if (p >= _data.Length) throw new InvalidOperationException("Truncated TLV: unterminated container.");
+                var c = _data[p++];
+                var t = (TlvElementType)(c & 0x1F);
+                if (t == TlvElementType.EndOfContainer) { depth--; continue; }
+                p += TagLengthBytes((TlvTagControl)(c & 0xE0));
+                if (t is TlvElementType.Structure or TlvElementType.Array or TlvElementType.List) depth++;
+                else p += ValueLengthBytesAt(p, t);
             }
-            _pos += TagLengthBytes((TlvTagControl)(control & 0xE0));
-            if (type is TlvElementType.Structure or TlvElementType.Array or TlvElementType.List)
-            {
-                depth++;
-                continue; // its EndOfContainer will decrement depth
-            }
-            _pos += ValueLengthBytes(type);
+            return p;
         }
+        return p + ValueLengthBytesAt(p, type);
     }
 
     private static int TagLengthBytes(TlvTagControl tagControl) => tagControl switch
@@ -197,17 +203,17 @@ public ref struct TlvReader
         _ => 0,
     };
 
-    /// <summary>Bytes consumed by a non-container element's value (including any length prefix).</summary>
-    private int ValueLengthBytes(TlvElementType type) => type switch
+    /// <summary>Bytes consumed by a non-container element's value at <paramref name="pos"/> (including any length prefix).</summary>
+    private int ValueLengthBytesAt(int pos, TlvElementType type) => type switch
     {
         TlvElementType.SignedInt1 or TlvElementType.UnsignedInt1 => 1,
         TlvElementType.SignedInt2 or TlvElementType.UnsignedInt2 => 2,
         TlvElementType.SignedInt4 or TlvElementType.UnsignedInt4 or TlvElementType.Float4 => 4,
         TlvElementType.SignedInt8 or TlvElementType.UnsignedInt8 or TlvElementType.Float8 => 8,
         TlvElementType.BooleanFalse or TlvElementType.BooleanTrue or TlvElementType.Null => 0,
-        TlvElementType.Utf8String1 or TlvElementType.ByteString1 => 1 + _data[_pos],
-        TlvElementType.Utf8String2 or TlvElementType.ByteString2 => 2 + BinaryPrimitives.ReadUInt16LittleEndian(_data.Slice(_pos)),
-        TlvElementType.Utf8String4 or TlvElementType.ByteString4 => 4 + checked((int)BinaryPrimitives.ReadUInt32LittleEndian(_data.Slice(_pos))),
+        TlvElementType.Utf8String1 or TlvElementType.ByteString1 => 1 + _data[pos],
+        TlvElementType.Utf8String2 or TlvElementType.ByteString2 => 2 + BinaryPrimitives.ReadUInt16LittleEndian(_data.Slice(pos)),
+        TlvElementType.Utf8String4 or TlvElementType.ByteString4 => 4 + checked((int)BinaryPrimitives.ReadUInt32LittleEndian(_data.Slice(pos))),
         _ => throw new NotSupportedException($"Cannot size element type {type}."),
     };
 
