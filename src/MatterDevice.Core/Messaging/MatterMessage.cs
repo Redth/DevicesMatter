@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using MatterDevice.Core.Crypto;
 
 namespace MatterDevice.Core.Messaging;
 
@@ -55,8 +56,33 @@ public sealed class MatterMessage
     public byte[] Encode()
     {
         var buf = new ArrayWriter();
+        WriteMessageHeader(buf);
+        WriteProtocolHeaderAndPayload(buf);
+        return buf.ToArray();
+    }
 
-        // --- message header ---
+    /// <summary>
+    /// The unencrypted message header (Matter Core Spec §4.4.1): message flags, session id, security
+    /// flags, counter, and any source/destination node ids. For a secure message these bytes are the
+    /// AEAD additional-authenticated-data; the protocol header + payload are what gets encrypted.
+    /// </summary>
+    public byte[] EncodeMessageHeader()
+    {
+        var buf = new ArrayWriter();
+        WriteMessageHeader(buf);
+        return buf.ToArray();
+    }
+
+    /// <summary>The protocol header + application payload — the plaintext that the secure path encrypts.</summary>
+    public byte[] EncodeProtocolPayload()
+    {
+        var buf = new ArrayWriter();
+        WriteProtocolHeaderAndPayload(buf);
+        return buf.ToArray();
+    }
+
+    private void WriteMessageHeader(ArrayWriter buf)
+    {
         byte msgFlags = 0x00; // version 0, DSIZ depends on destination
         if (SourceNodeId.HasValue) msgFlags |= MsgFlagSourcePresent;
         if (DestinationNodeId.HasValue) msgFlags |= 0x01; // DSIZ = 1 (64-bit node id)
@@ -66,8 +92,10 @@ public sealed class MatterMessage
         buf.WriteUInt32(MessageCounter);
         if (SourceNodeId.HasValue) buf.WriteUInt64(SourceNodeId.Value);
         if (DestinationNodeId.HasValue) buf.WriteUInt64(DestinationNodeId.Value);
+    }
 
-        // --- protocol header ---
+    private void WriteProtocolHeaderAndPayload(ArrayWriter buf)
+    {
         byte exFlags = 0x00;
         if (IsInitiator) exFlags |= ExFlagInitiator;
         if (IsAck) exFlags |= ExFlagAck;
@@ -78,14 +106,67 @@ public sealed class MatterMessage
         buf.WriteUInt16((ushort)ProtocolId);
         if (IsAck)
             buf.WriteUInt32(AckedMessageCounter ?? 0);
-
-        // --- payload ---
         buf.WriteBytes(Payload);
-        return buf.ToArray();
+    }
+
+    /// <summary>
+    /// The 13-byte AEAD nonce (Matter Core Spec §4.7.2): security flags ‖ message counter (LE) ‖ source
+    /// node id (LE). For a message with no source node id, zero is used.
+    /// </summary>
+    public byte[] BuildNonce()
+    {
+        var nonce = new byte[13];
+        nonce[0] = SecurityFlags;
+        BinaryPrimitives.WriteUInt32LittleEndian(nonce.AsSpan(1), MessageCounter);
+        BinaryPrimitives.WriteUInt64LittleEndian(nonce.AsSpan(5), SourceNodeId ?? 0);
+        return nonce;
     }
 
     /// <summary>Parses an on-wire frame (unsecured/plaintext path).</summary>
     public static MatterMessage Decode(ReadOnlySpan<byte> data)
+    {
+        var (msg, headerLen) = DecodeMessageHeader(data);
+        msg.ParseProtocolPayload(data.Slice(headerLen));
+        return msg;
+    }
+
+    /// <summary>
+    /// Serializes the frame as an encrypted (secure-session) message: the plaintext message header
+    /// followed by AES-CCM(protocol header ‖ payload) ‖ tag, with AAD = the message header and the nonce
+    /// built from this message's security flags / counter / source node id.
+    /// </summary>
+    public byte[] EncodeSecure(ReadOnlySpan<byte> key)
+    {
+        var header = EncodeMessageHeader();
+        var inner = EncodeProtocolPayload();
+        var sealed_ = MatterAead.Encrypt(key, BuildNonce(), inner, header);
+
+        var output = new byte[header.Length + sealed_.Length];
+        header.CopyTo(output, 0);
+        sealed_.CopyTo(output, header.Length);
+        return output;
+    }
+
+    /// <summary>
+    /// Parses and decrypts a secure-session frame with <paramref name="key"/>. Throws if the
+    /// authentication tag does not verify.
+    /// </summary>
+    public static MatterMessage DecodeSecure(ReadOnlySpan<byte> data, ReadOnlySpan<byte> key)
+    {
+        var (msg, headerLen) = DecodeMessageHeader(data);
+        var header = data[..headerLen];
+        var ciphertextAndTag = data[headerLen..];
+        var plaintext = MatterAead.Decrypt(key, msg.BuildNonce(), ciphertextAndTag, header);
+        msg.ParseProtocolPayload(plaintext);
+        return msg;
+    }
+
+    /// <summary>
+    /// Parses just the message header, returning the populated message (header fields only) and the
+    /// header length. For a secure message, <c>data[0..headerLen]</c> is the AEAD AAD and the rest is the
+    /// ciphertext + tag.
+    /// </summary>
+    public static (MatterMessage Message, int HeaderLength) DecodeMessageHeader(ReadOnlySpan<byte> data)
     {
         var msg = new MatterMessage();
         var pos = 0;
@@ -109,24 +190,27 @@ public sealed class MatterMessage
                 pos += 2; // group id — not modeled
                 break;
         }
+        return (msg, pos);
+    }
 
-        // NOTE: a real decoder branches here on SessionId/SecurityFlags to decrypt. PASE is unsecured.
-        var exFlags = data[pos++];
-        msg.IsInitiator = (exFlags & ExFlagInitiator) != 0;
-        msg.IsAck = (exFlags & ExFlagAck) != 0;
-        msg.RequiresAck = (exFlags & ExFlagReliability) != 0;
-        msg.Opcode = data[pos++];
-        msg.ExchangeId = BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(pos)); pos += 2;
+    /// <summary>Parses the protocol header + application payload (the decrypted plaintext for a secure message).</summary>
+    public void ParseProtocolPayload(ReadOnlySpan<byte> inner)
+    {
+        var pos = 0;
+        var exFlags = inner[pos++];
+        IsInitiator = (exFlags & ExFlagInitiator) != 0;
+        IsAck = (exFlags & ExFlagAck) != 0;
+        RequiresAck = (exFlags & ExFlagReliability) != 0;
+        Opcode = inner[pos++];
+        ExchangeId = BinaryPrimitives.ReadUInt16LittleEndian(inner.Slice(pos)); pos += 2;
         if ((exFlags & ExFlagVendor) != 0)
             pos += 2; // vendor id — standard vendor assumed
-        msg.ProtocolId = (MatterProtocolId)BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(pos)); pos += 2;
-        if (msg.IsAck)
+        ProtocolId = (MatterProtocolId)BinaryPrimitives.ReadUInt16LittleEndian(inner.Slice(pos)); pos += 2;
+        if (IsAck)
         {
-            msg.AckedMessageCounter = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(pos)); pos += 4;
+            AckedMessageCounter = BinaryPrimitives.ReadUInt32LittleEndian(inner.Slice(pos)); pos += 4;
         }
-
-        msg.Payload = data.Slice(pos).ToArray();
-        return msg;
+        Payload = inner.Slice(pos).ToArray();
     }
 
     /// <summary>Minimal growable little-endian writer used by <see cref="Encode"/>.</summary>
