@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/ThermostatNode/ThermostatNode.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/MatterDevice.Commissioning/MatterDevice.Commissioning.csproj" />
+    <Project Path="src/MatterDevice.Core/MatterDevice.Core.csproj" />
+    <Project Path="src/MatterDevice.DataModel/MatterDevice.DataModel.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/MatterDevice.Tests/MatterDevice.Tests.csproj" />
+  </Folder>
+</Solution>

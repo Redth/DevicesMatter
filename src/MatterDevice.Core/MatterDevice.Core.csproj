@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Wire format + crypto + transport: TLV codec, message framing, MRP, sessions, crypto.
+       Role-agnostic; the device/bridge logic builds on top of this. -->
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="BouncyCastle.Cryptography" />
+  </ItemGroup>
+
+</Project>

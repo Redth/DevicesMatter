@@ -1,0 +1,36 @@
+<Project>
+
+  <!--
+    Shared build settings for every project in MatterDevice.NET.
+    Mirrors the conventions of the sibling PoolEquipmentIntegrations monorepo
+    (the first downstream consumer): one artifacts tree, nullable on, warnings as errors.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- CS1591: missing XML doc comment — we don't require docs on every public member yet. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+  <!-- Package metadata (applies to the src/ libraries; samples/tests opt out of packing). -->
+  <PropertyGroup>
+    <Authors>redth</Authors>
+    <Product>MatterDevice.NET</Product>
+    <PackageProjectUrl>https://github.com/redth/MatterDevice.NET</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/redth/MatterDevice.NET</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <Version>0.1.0-alpha</Version>
+  </PropertyGroup>
+
+</Project>
