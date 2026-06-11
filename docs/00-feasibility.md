@@ -42,7 +42,7 @@ completes."
 | Primitive | Source | Notes |
 |---|---|---|
 | SHA-256, HMAC-SHA256, HKDF, PBKDF2 | **.NET BCL** (`System.Security.Cryptography`) | all in-box, no dependency |
-| AES-CCM (message/session encryption) | **.NET BCL** (`System.Security.Cryptography.AesCcm`) | in-box; not yet wired |
+| AES-CCM (message/session encryption) | **.NET BCL** `AesCcm` on Linux/Windows; **BouncyCastle** CCM on macOS | ✅ done. ⚠️ the BCL's `AesCcm` throws `PlatformNotSupportedException` on **macOS** — `MatterAead` falls back to BouncyCastle there automatically, so dev-on-Mac works and prod-on-Linux uses the BCL |
 | EC point add / scalar-mult arbitrary points / decompression (SPAKE2+) | **BouncyCastle** | the BCL's EC types don't expose raw point math; this is the one third-party dep, isolated in `Spake2Plus` |
 | X.509 / DER / Matter-TLV certs (attestation, NOC) | **.NET BCL** (`System.Formats.Asn1`, `X509Certificate2`) + a Matter-cert ↔ X.509 converter to write | in-box building blocks |
 | Ed25519/ECDSA P-256 signatures (attestation, CASE) | **.NET BCL** (`ECDsa`) | in-box |

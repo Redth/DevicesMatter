@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MatterDevice.Core\MatterDevice.Core.csproj" />
     <ProjectReference Include="..\..\src\MatterDevice.Commissioning\MatterDevice.Commissioning.csproj" />
+    <ProjectReference Include="..\..\src\MatterDevice.DataModel\MatterDevice.DataModel.csproj" />
   </ItemGroup>
 
   <ItemGroup>
