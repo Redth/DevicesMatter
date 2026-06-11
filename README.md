@@ -12,24 +12,32 @@ C++/Node sidecar**.
 > for the verdict, the subsystem work-map, and the roadmap; [`BRIEF.md`](BRIEF.md) for the original
 > mission.
 
-## What works today (spike)
+## What works today
 
+**Spike (commissioning crypto + discovery):**
 - **Matter TLV** codec (`MatterDevice.Core/Tlv`)
 - **SPAKE2+** over P-256 in the Matter convention — proven against CHIP `SPAKE2P_RFC_test_vectors.h`
-- **Message framing** (unsecured session) + **PASE** (PBKDFParamRequest…Pake3, StatusReport)
+- **Message framing** + **PASE** (PBKDFParamRequest…Pake3, StatusReport)
 - **Full PASE handshake** end-to-end: device + commissioner derive identical session keys, in-process
   and over **loopback UDP**
 - **Onboarding payload** — QR (Base38) + manual pairing code (Verhoeff), pinned to CHIP vectors
 - **mDNS** commissionable advertising (`_matterc._udp`, `_L`/`_S` subtypes, SRV/TXT) — announces live
 - **`ThermostatNode` sample** — advertises over IP, prints the QR + manual code, runs PASE on UDP 5540
 
-Not yet: post-PASE encryption (AES-CCM), CASE, the Interaction Model, the cluster library, attestation —
-see the feasibility doc's roadmap.
+**Milestone 1 progress (toward "commissions to operational"):**
+- **AES-CCM secure messaging** — proven with the real PASE-derived session keys (portable: BCL on
+  Linux/Windows, BouncyCastle on macOS)
+- **Interaction Model** — Read (ReadRequest↔ReportData, incl. wildcards) and Invoke
+  (InvokeRequest↔InvokeResponse) over the data model
+- **Commissioning clusters** — Basic Information + General Commissioning, driven through the IM
+
+Not yet: CASE, device attestation + Matter cert format, the rest of the cluster library, persistence,
+and the live chip-tool/HA validation — see [`docs/01-milestone1-progress.md`](docs/01-milestone1-progress.md).
 
 ## Build / test / run
 
 ```bash
-dotnet test                                   # 17 tests: SPAKE2+ KAT, PASE, setup payload, framing, mDNS
+dotnet test                                   # 27 tests: SPAKE2+ KAT, PASE, AES-CCM, IM, clusters, setup payload, mDNS
 dotnet run --project samples/ThermostatNode   # advertise + accept commissioning (Ctrl+C to stop)
 ```
 
