@@ -25,6 +25,23 @@ with crypto primitives pinned to CHIP/spec known-answer vectors.
 The `ThermostatNode` sample is a runnable device: it advertises over mDNS, prints the QR + manual code,
 and accepts the complete commissioning flow through one `ProcessDatagram` entry point.
 
+## Interop-validated against matter.js (an independent controller) — 2026-06
+
+Tested with the real [matter.js](https://github.com/project-chip/matter.js) controller (no shared code);
+see [`../tools/interop-controller`](../tools/interop-controller). Confirmed working over real UDP:
+
+- ✅ **mDNS discovery** — matter.js finds the device and parses every TXT/subtype record correctly.
+- ✅ **PASE / SPAKE2+** — full handshake completes with MRP acks: *"Paired successfully."*
+- ✅ **Encrypted session + IM transport** — our device decrypts matter.js's read requests and returns
+  encrypted ReportData.
+- ⛔ Stops at **`GetInitialData`**: matter.js reads `GeneralCommissioning.BasicCommissioningInfo`,
+  `OperationalCredentials.commissionedFabrics`, `NetworkCommissioning`, … and our device returns *empty*
+  reports for attributes it doesn't expose yet.
+
+So the entire transport/crypto stack (discovery, PASE, MRP, AES-CCM, encrypted IM) is **interop-proven
+against a third party** — a much stronger result than our own loopback harness. The remaining work below
+is now concretely ordered by what matter.js asks for next.
+
 ## Remaining for byte-level interop with a real controller (chip-tool / Apple / HA)
 
 The protocol logic is complete and internally consistent. What stands between this and a controller
