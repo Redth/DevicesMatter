@@ -62,7 +62,7 @@ internal sealed class CaseInitiator
         _sharedSecret = _eph.EcdhSharedSecret(sigma2.ResponderEphPublicKey);
 
         // decrypt encrypted2, verify the device's NOC + signature
-        var s2k = CaseCrypto.Sigma2Key(_sharedSecret, _operationalIpk, sigma2.ResponderRandom, sigma2.ResponderEphPublicKey);
+        var s2k = CaseCrypto.Sigma2Key(_sharedSecret, _operationalIpk, sigma2.ResponderRandom, sigma2.ResponderEphPublicKey, SHA256.HashData(_sigma1Bytes));
         var tbe2 = MatterAead.Decrypt(s2k, CaseCrypto.Sigma2Nonce, sigma2.Encrypted2, ReadOnlySpan<byte>.Empty);
         var data2 = CaseMessages.DecodeTbeData(tbe2);
         var deviceNoc = MatterCertificate.Decode(data2.Noc);

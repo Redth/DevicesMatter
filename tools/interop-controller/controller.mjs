@@ -55,7 +55,7 @@ try {
             discoveryCapabilities: { onIpNetwork: true },
         },
         passcode: PASSCODE,
-    });
+    }, { connectNodeAfterCommissioning: false });
     console.log(`\n🎉 COMMISSIONED — nodeId ${nodeId}`);
 } catch (err) {
     console.log(`\n✗ Commissioning stopped: ${err?.message ?? err}`);

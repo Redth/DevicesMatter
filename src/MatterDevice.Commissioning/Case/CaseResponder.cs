@@ -58,7 +58,8 @@ public sealed class CaseResponder
         var resumptionId = RandomNumberGenerator.GetBytes(16);
         var tbe2 = CaseMessages.EncodeTbeData2(nocBytes, icacBytes, signature, resumptionId);
 
-        var s2k = CaseCrypto.Sigma2Key(_sharedSecret, _fabric.OperationalIpk, _responderRandom, _responderEph.PublicKey);
+        var sigma1Hash = SHA256.HashData(_sigma1Bytes);
+        var s2k = CaseCrypto.Sigma2Key(_sharedSecret, _fabric.OperationalIpk, _responderRandom, _responderEph.PublicKey, sigma1Hash);
         var encrypted2 = MatterAead.Encrypt(s2k, CaseCrypto.Sigma2Nonce, tbe2, ReadOnlySpan<byte>.Empty);
 
         var sigma2 = new CaseMessages.Sigma2

@@ -52,6 +52,9 @@ public sealed class MatterDeviceNode
     public FabricTable Fabrics => _fabrics;
     public IReadOnlyCollection<SecureSession> Sessions => _sessions.Active;
 
+    /// <summary>Raised when a fabric is committed via AddNOC — the host can begin operational advertising.</summary>
+    public event Action<Fabric>? FabricCommissioned;
+
     /// <summary>Processes one inbound datagram and returns the response datagram(s) (usually one).</summary>
     public IReadOnlyList<byte[]> ProcessDatagram(byte[] datagram)
     {
@@ -243,11 +246,22 @@ public sealed class MatterDeviceNode
             case 0x0B: // AddTrustedRootCertificate
                 _commissioning!.HandleAddTrustedRoot(fields.Bytes(0));
                 return new CommandResult(cmd.Path, ImStatus.Success);
+            case 0x09: // UpdateFabricLabel → NOCResponse(Ok)
+                return ResponseCommand(cmd.Path, 0x08, w =>
+                {
+                    w.WriteUInt(TlvTag.ContextSpecific(0), (byte)NodeOperationalCertStatus.Ok);
+                    w.WriteUInt(TlvTag.ContextSpecific(1), (byte)1); // fabric index
+                    w.WriteString(TlvTag.ContextSpecific(2), "");
+                });
             case 0x06: // AddNOC
             {
                 var (status, fabricIndex) = _commissioning!.HandleAddNoc(fields.Bytes(0), fields.Bytes(2));
                 if (status == NodeOperationalCertStatus.Ok && fabricIndex is { } idx)
+                {
                     OperationalCredentialsClusterOnRoot()?.OnFabricAdded(idx);
+                    if (_fabrics.Get(idx) is { } fabric)
+                        FabricCommissioned?.Invoke(fabric);
+                }
                 return ResponseCommand(cmd.Path, 0x08, w =>
                 {
                     w.WriteUInt(TlvTag.ContextSpecific(0), (byte)status);

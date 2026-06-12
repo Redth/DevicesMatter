@@ -23,7 +23,8 @@ public sealed class MdnsResponder : IAsyncDisposable
     private readonly MatterCommissionableService _service;
     private readonly ILogger _log;
     private readonly UdpClient _udp;
-    private readonly HashSet<string> _ourNames;
+    private readonly List<IMdnsAdvertisement> _ads = [];
+    private readonly Lock _gate = new();
 
     public MdnsResponder(MatterCommissionableService service, ILogger? logger = null)
     {
@@ -36,28 +37,26 @@ public sealed class MdnsResponder : IAsyncDisposable
         _udp.JoinMulticastGroup(MulticastV4);
         _udp.MulticastLoopback = true;
 
-        var shortDisc = (service.Discriminator >> 8) & 0x0F;
-        _ourNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            MatterCommissionableService.ServiceType,
-            service.InstanceName,
-            service.HostName,
-            $"_L{service.Discriminator}._sub.{MatterCommissionableService.ServiceType}",
-            $"_S{shortDisc}._sub.{MatterCommissionableService.ServiceType}",
-            $"_V{service.VendorId}._sub.{MatterCommissionableService.ServiceType}",
-            $"_CM._sub.{MatterCommissionableService.ServiceType}",
-        };
+        _ads.Add(service);
     }
 
-    /// <summary>Announces the service (gratuitous response) — call a couple of times on startup.</summary>
+    /// <summary>Adds a service to advertise (e.g. the operational service after commissioning) and announces it.</summary>
+    public async Task AdvertiseAsync(IMdnsAdvertisement advertisement)
+    {
+        lock (_gate) _ads.Add(advertisement);
+        await SendAsync(advertisement.BuildRecords()).ConfigureAwait(false);
+        _log.LogInformation("mDNS now advertising {Count} service(s)", _ads.Count);
+    }
+
+    /// <summary>Announces all current services (gratuitous response).</summary>
     public async Task AnnounceAsync()
     {
-        var packet = DnsMessage.BuildResponse(_service.BuildRecords());
-        await _udp.SendAsync(packet, packet.Length, new IPEndPoint(MulticastV4, MdnsPort)).ConfigureAwait(false);
-        _log.LogInformation("mDNS announced {Instance} ({Count} records)", _service.InstanceName, _service.BuildRecords().Count);
+        foreach (var ad in Snapshot())
+            await SendAsync(ad.BuildRecords()).ConfigureAwait(false);
+        _log.LogInformation("mDNS announced {Instance}", _service.InstanceName);
     }
 
-    /// <summary>Listens for queries and answers those matching our names, until cancelled.</summary>
+    /// <summary>Listens for queries and answers those matching any advertised service, until cancelled.</summary>
     public async Task RunAsync(CancellationToken ct)
     {
         await AnnounceAsync().ConfigureAwait(false);
@@ -72,15 +71,26 @@ public sealed class MdnsResponder : IAsyncDisposable
                 var msg = DnsMessage.Parse(rx.Buffer);
                 if (msg.IsResponse)
                     continue;
-                if (msg.Questions.Any(q => _ourNames.Contains(q.Name)))
+                var questionNames = msg.Questions.Select(q => q.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var ad in Snapshot())
                 {
-                    var packet = DnsMessage.BuildResponse(_service.BuildRecords());
-                    await _udp.SendAsync(packet, packet.Length, new IPEndPoint(MulticastV4, MdnsPort)).ConfigureAwait(false);
-                    _log.LogDebug("mDNS answered query for {Names}", string.Join(",", msg.Questions.Select(q => q.Name)));
+                    if (ad.QueryableNames().Any(questionNames.Contains))
+                        await SendAsync(ad.BuildRecords()).ConfigureAwait(false);
                 }
             }
             catch (Exception ex) { _log.LogTrace(ex, "Ignoring malformed mDNS packet"); }
         }
+    }
+
+    private async Task SendAsync(IReadOnlyList<DnsRecord> records)
+    {
+        var packet = DnsMessage.BuildResponse(records);
+        await _udp.SendAsync(packet, packet.Length, new IPEndPoint(MulticastV4, MdnsPort)).ConfigureAwait(false);
+    }
+
+    private List<IMdnsAdvertisement> Snapshot()
+    {
+        lock (_gate) return [.. _ads];
     }
 
     /// <summary>Local non-loopback IPv4 addresses, for the A records.</summary>

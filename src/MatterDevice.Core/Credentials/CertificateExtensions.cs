@@ -38,6 +38,14 @@ public sealed class CertificateExtensions
 
         w.WriteUInt(TlvTag.ContextSpecific(TagKeyUsage), KeyUsage);
 
+        if (ExtendedKeyUsage.Count > 0)
+        {
+            w.StartArray(TlvTag.ContextSpecific(TagExtendedKeyUsage));
+            foreach (var eku in ExtendedKeyUsage)
+                w.WriteUInt(TlvTag.Anonymous, eku);
+            w.EndContainer();
+        }
+
         if (SubjectKeyId is { } skid)
             w.WriteBytes(TlvTag.ContextSpecific(TagSubjectKeyId), skid);
         if (AuthorityKeyId is { } akid)

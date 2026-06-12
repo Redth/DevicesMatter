@@ -73,6 +73,21 @@ var service = new MatterCommissionableService
 await using var mdns = new MdnsResponder(service, loggerFactory.CreateLogger<MdnsResponder>());
 await using var host = new MatterUdpHost(device, MatterUdpHost.DefaultPort, loggerFactory.CreateLogger<MatterUdpHost>());
 
+// Once commissioned, advertise the operational service so a controller can reconnect via CASE.
+device.FabricCommissioned += fabric =>
+{
+    var operational = new MatterOperationalService
+    {
+        CompressedFabricIdHex = Convert.ToHexString(fabric.CompressedFabricId),
+        NodeIdHex = fabric.NodeId.ToString("X16"),
+        HostName = service.HostName,
+        Addresses = service.Addresses,
+    };
+    log.LogInformation("Commissioned onto fabric {Fabric:X} — advertising operational {Instance}",
+        fabric.FabricId, operational.InstanceName);
+    _ = mdns.AdvertiseAsync(operational);
+};
+
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 log.LogInformation("Advertising + listening on UDP {Port}. Ctrl+C to stop.", MatterUdpHost.DefaultPort);

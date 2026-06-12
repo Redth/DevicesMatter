@@ -32,10 +32,20 @@ public static class CaseCrypto
         return HMACSHA256.HashData(operationalIpk, msg);
     }
 
-    /// <summary>S2K = HKDF-SHA256(IKM = sharedSecret, salt = IPK ‖ responderRandom ‖ responderEphPubKey, info = "Sigma2", 16).</summary>
-    public static byte[] Sigma2Key(ReadOnlySpan<byte> sharedSecret, ReadOnlySpan<byte> ipk, ReadOnlySpan<byte> responderRandom, ReadOnlySpan<byte> responderEphPublicKey)
+    /// <summary>
+    /// S2K = HKDF-SHA256(IKM = sharedSecret,
+    /// salt = IPK ‖ responderRandom ‖ responderEphPubKey ‖ SHA256(Sigma1 bytes), info = "Sigma2", 16).
+    /// (The Sigma1 transcript hash IS part of the S2K salt — verified against matter.js CaseClient.)
+    /// </summary>
+    public static byte[] Sigma2Key(ReadOnlySpan<byte> sharedSecret, ReadOnlySpan<byte> ipk,
+        ReadOnlySpan<byte> responderRandom, ReadOnlySpan<byte> responderEphPublicKey, ReadOnlySpan<byte> sigma1Hash)
     {
-        var salt = Concat(ipk, responderRandom, responderEphPublicKey);
+        var salt = new byte[ipk.Length + responderRandom.Length + responderEphPublicKey.Length + sigma1Hash.Length];
+        var o = 0;
+        ipk.CopyTo(salt.AsSpan(o)); o += ipk.Length;
+        responderRandom.CopyTo(salt.AsSpan(o)); o += responderRandom.Length;
+        responderEphPublicKey.CopyTo(salt.AsSpan(o)); o += responderEphPublicKey.Length;
+        sigma1Hash.CopyTo(salt.AsSpan(o));
         return Hkdf16(sharedSecret, salt, "Sigma2"u8);
     }
 

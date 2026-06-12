@@ -9,7 +9,7 @@ namespace MatterDevice.Commissioning.Discovery;
 /// record set: the <c>_matterc._udp.local</c> service PTR, the <c>_L</c>/<c>_S</c> discriminator subtype
 /// PTRs, SRV, TXT (<c>D</c>, <c>CM</c>, <c>VP</c>, …) and the host A/AAAA records.
 /// </summary>
-public sealed class MatterCommissionableService
+public sealed class MatterCommissionableService : IMdnsAdvertisement
 {
     public const string ServiceType = "_matterc._udp.local";
 
@@ -32,6 +32,19 @@ public sealed class MatterCommissionableService
     public IReadOnlyList<IPAddress> Addresses { get; init; } = [];
 
     public string InstanceName => $"{InstanceId}.{ServiceType}";
+
+    public IEnumerable<string> QueryableNames()
+    {
+        var shortDisc = (Discriminator >> 8) & 0x0F;
+        return
+        [
+            ServiceType, InstanceName, HostName,
+            $"_L{Discriminator}._sub.{ServiceType}",
+            $"_S{shortDisc}._sub.{ServiceType}",
+            $"_V{VendorId}._sub.{ServiceType}",
+            $"_CM._sub.{ServiceType}",
+        ];
+    }
 
     /// <summary>The TXT key/value pairs for this commissionable node (D and CM are mandatory).</summary>
     public IReadOnlyList<string> TxtEntries()
