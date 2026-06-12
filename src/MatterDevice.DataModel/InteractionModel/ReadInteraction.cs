@@ -16,7 +16,9 @@ public static class ReadInteraction
     private const int TagIsFabricFiltered = 3;
 
     // ReportDataMessage tags
+    private const int TagSubscriptionId = 0;
     private const int TagAttributeReports = 1;
+    private const int TagMoreChunkedMessages = 3;
     private const int TagSuppressResponse = 4;
 
     // AttributeReportIB / AttributeDataIB tags
@@ -93,11 +95,17 @@ public static class ReadInteraction
         return paths;
     }
 
-    /// <summary>Builds a ReportData message carrying the given attribute reports.</summary>
-    public static byte[] EncodeReport(IReadOnlyList<AttributeReport> reports, bool suppressResponse = true)
+    /// <summary>
+    /// Builds a ReportData message carrying the given attribute reports. When <paramref name="subscriptionId"/>
+    /// is set the report belongs to a subscription (and the response is not suppressed, so the subscriber acks it).
+    /// </summary>
+    public static byte[] EncodeReport(IReadOnlyList<AttributeReport> reports, bool suppressResponse = true, uint? subscriptionId = null, bool moreChunkedMessages = false)
     {
         var w = new TlvWriter();
         w.StartStructure(TlvTag.Anonymous);
+
+        if (subscriptionId is { } sid)
+            w.WriteUInt(TlvTag.ContextSpecific(TagSubscriptionId), sid);
 
         w.StartArray(TlvTag.ContextSpecific(TagAttributeReports));
         foreach (var rep in reports)
@@ -112,6 +120,8 @@ public static class ReadInteraction
         }
         w.EndContainer();                                               // AttributeReports array
 
+        if (moreChunkedMessages)
+            w.WriteBool(TlvTag.ContextSpecific(TagMoreChunkedMessages), true);
         w.WriteBool(TlvTag.ContextSpecific(TagSuppressResponse), suppressResponse);
         w.WriteUInt(TlvTag.ContextSpecific(ImConstants.InteractionModelRevisionTag), ImConstants.InteractionModelRevision);
         w.EndContainer();

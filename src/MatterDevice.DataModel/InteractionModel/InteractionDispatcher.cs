@@ -106,6 +106,8 @@ public sealed class InteractionDispatcher(Node node)
             or TlvElementType.Utf8String4 => r.GetString(),
         TlvElementType.ByteString1 or TlvElementType.ByteString2
             or TlvElementType.ByteString4 => r.GetBytes().ToArray(),
+        // Structured values (struct/array/list) are captured verbatim and replayed on read.
+        TlvElementType.Structure or TlvElementType.Array or TlvElementType.List => new TlvRawValue(r.CurrentElementSpan.ToArray()),
         _ => throw new NotSupportedException($"No CLR decoding for TLV element {r.ElementType}."),
     };
 }

@@ -25,6 +25,10 @@ public sealed class MatterUdpHost : IAsyncDisposable
         _udp = new UdpClient(AddressFamily.InterNetwork);
         _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         _udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));
+
+        // Let the node push asynchronous subscription reports back to a peer endpoint.
+        _node.SendDatagram = async (peer, datagram, token) =>
+            await _udp.SendAsync(datagram, datagram.Length, (IPEndPoint)peer).ConfigureAwait(false);
     }
 
     public int BoundPort => ((IPEndPoint)_udp.Client.LocalEndPoint!).Port;
@@ -32,6 +36,7 @@ public sealed class MatterUdpHost : IAsyncDisposable
     public async Task RunAsync(CancellationToken ct)
     {
         _log.LogInformation("Matter UDP host listening on port {Port}", BoundPort);
+        var heartbeat = RunHeartbeatAsync(ct);
         while (!ct.IsCancellationRequested)
         {
             UdpReceiveResult rx;
@@ -40,7 +45,7 @@ public sealed class MatterUdpHost : IAsyncDisposable
 
             try
             {
-                foreach (var response in _node.ProcessDatagram(rx.Buffer))
+                foreach (var response in _node.ProcessDatagram(rx.Buffer, rx.RemoteEndPoint))
                     await _udp.SendAsync(response, response.Length, rx.RemoteEndPoint).ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -48,6 +53,21 @@ public sealed class MatterUdpHost : IAsyncDisposable
                 _log.LogWarning(ex, "Failed to process datagram from {Peer}", rx.RemoteEndPoint);
             }
         }
+        await heartbeat.ConfigureAwait(false);
+    }
+
+    /// <summary>Periodically nudges the node to emit subscription heartbeat reports.</summary>
+    private async Task RunHeartbeatAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), ct).ConfigureAwait(false);
+                await _node.TickAsync(ct).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { /* shutting down */ }
     }
 
     public ValueTask DisposeAsync()

@@ -29,6 +29,9 @@ public sealed class SecureSession
 
     public byte[] AttestationChallenge { get; init; } = [];
 
+    /// <summary>An opaque transport token for the peer (e.g. its UDP endpoint), used to push async reports.</summary>
+    public object? Peer { get; set; }
+
     private uint _outboundCounter = (BitConverter.ToUInt32(RandomNumberGenerator.GetBytes(4)) >> 4) + 1;
     private readonly MessageReceptionState _reception = new();
 

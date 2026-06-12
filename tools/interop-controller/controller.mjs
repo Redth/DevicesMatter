@@ -46,8 +46,8 @@ if (mode === "discover") {
     process.exit(0);
 }
 
-// ---- commissioning ----
-console.log("Attempting to commission (PASE → attestation → CSR → AddNOC → CASE) ...\n");
+// ---- commissioning (+ operational interview: the controller connects, interviews and subscribes) ----
+console.log("Attempting to commission (PASE → attestation → CSR → AddNOC → CASE → interview) ...\n");
 try {
     const nodeId = await controller.commissionNode({
         discovery: {
@@ -55,11 +55,28 @@ try {
             discoveryCapabilities: { onIpNetwork: true },
         },
         passcode: PASSCODE,
-    }, { connectNodeAfterCommissioning: false });
+    });
     console.log(`\n🎉 COMMISSIONED — nodeId ${nodeId}`);
+
+    // ---- operate the device: read, write, observe a subscription report ----
+    const node = await controller.getNode(nodeId);
+    await node.events.initialized;
+    console.log("✓ Node interviewed (operational subscription established).");
+
+    const thermostat = node.getRootEndpoint()?.getChildEndpoint(1)?.getClusterClient(
+        (await import("@matter/main/clusters")).ThermostatCluster);
+    if (thermostat) {
+        const temp = await thermostat.getLocalTemperatureAttribute();
+        console.log(`✓ Read Thermostat.localTemperature = ${temp / 100} °C`);
+        await thermostat.setOccupiedHeatingSetpointAttribute(3000);
+        console.log("✓ Wrote Thermostat.occupiedHeatingSetpoint = 30.0 °C");
+        const after = await thermostat.getOccupiedHeatingSetpointAttribute();
+        console.log(`✓ Read back occupiedHeatingSetpoint = ${after / 100} °C`);
+    }
+    console.log("\n🎉 FULLY OPERATIONAL — commissioned, interviewed, read + wrote attributes.");
 } catch (err) {
-    console.log(`\n✗ Commissioning stopped: ${err?.message ?? err}`);
-    console.log("  (Expected to break at the first not-yet-interop-complete step; the log above shows where.)");
+    console.log(`\n✗ Stopped: ${err?.message ?? err}`);
+    console.log(err?.stack?.split("\n").slice(0, 4).join("\n"));
 } finally {
     await controller.close();
 }

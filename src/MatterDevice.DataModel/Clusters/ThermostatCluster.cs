@@ -17,6 +17,7 @@ public sealed class ThermostatCluster : Cluster
 
     public ThermostatCluster() : base(ClusterId, "Thermostat")
     {
+        FeatureMap = 0x01; // Heating — makes OccupiedHeatingSetpoint feature-conformant
         LocalTemperatureCentiC = 0;
         OccupiedHeatingSetpointCentiC = 2000; // 20.00 °C
         SystemMode = ThermostatSystemMode.Heat;

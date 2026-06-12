@@ -32,10 +32,20 @@ var node = new Node();
 node.AddEndpoint(0, DeviceType.RootNode)
     .AddCluster(new BasicInformationCluster(vendorId, "MatterDevice.NET", productId, "Pool Heater", "MD-0001"))
     .AddCluster(new GeneralCommissioningCluster())
-    .AddCluster(new OperationalCredentialsCluster());
+    .AddCluster(new OperationalCredentialsCluster())
+    .AddCluster(new AccessControlCluster());
 var thermostat = new ThermostatCluster { LocalTemperatureCentiC = 2880, OccupiedHeatingSetpointCentiC = 2944 };
 node.AddEndpoint(1, DeviceType.Thermostat).AddCluster(thermostat);
 node.AddDescriptors(); // Descriptor cluster on every endpoint (commissioner enumerates the node)
+
+// React to controller writes — this is where real device logic (drive the heater) would go.
+thermostat.AttributeChanged += (_, attributeId) =>
+{
+    if (attributeId == ThermostatCluster.OccupiedHeatingSetpointId)
+        log.LogInformation("Controller set heating setpoint → {Set:0.0} °C", thermostat.OccupiedHeatingSetpointCentiC / 100.0);
+    else if (attributeId == ThermostatCluster.SystemModeId)
+        log.LogInformation("Controller set mode → {Mode}", thermostat.SystemMode);
+};
 log.LogInformation("Thermostat: water {Water:0.0} °C, setpoint {Set:0.0} °C",
     thermostat.LocalTemperatureCentiC / 100.0, thermostat.OccupiedHeatingSetpointCentiC / 100.0);
 
@@ -92,7 +102,19 @@ using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
 log.LogInformation("Advertising + listening on UDP {Port}. Ctrl+C to stop.", MatterUdpHost.DefaultPort);
 
-try { await Task.WhenAll(mdns.RunAsync(cts.Token), host.RunAsync(cts.Token)); }
+// Simulate a live water-temperature sensor — pushes change reports to any subscribers.
+var sensor = Task.Run(async () =>
+{
+    var t = thermostat.LocalTemperatureCentiC;
+    while (!cts.IsCancellationRequested)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(5), cts.Token); } catch (OperationCanceledException) { break; }
+        t = (short)(2850 + (Environment.TickCount / 1000 % 80)); // drift 28.5–29.3 °C
+        thermostat.SetAttribute(ThermostatCluster.LocalTemperatureId, t);
+    }
+});
+
+try { await Task.WhenAll(mdns.RunAsync(cts.Token), host.RunAsync(cts.Token), sensor); }
 catch (OperationCanceledException) { /* shutting down */ }
 
 log.LogInformation("Stopped. {Fabrics} fabric(s), {Sessions} session(s).", device.Fabrics.Count, device.Sessions.Count);
