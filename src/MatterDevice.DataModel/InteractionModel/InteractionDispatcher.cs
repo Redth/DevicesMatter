@@ -60,6 +60,7 @@ public sealed class InteractionDispatcher(Node node)
         switch (value)
         {
             case null: w.WriteNull(tag); break;
+            case IMatterTlvValue tlv: tlv.WriteTlv(w, tag); break;
             case bool b: w.WriteBool(tag, b); break;
             case sbyte sb: w.WriteInt(tag, sb); break;
             case short s: w.WriteInt(tag, s); break;

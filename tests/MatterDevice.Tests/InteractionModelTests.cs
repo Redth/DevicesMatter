@@ -59,9 +59,11 @@ public class InteractionModelTests
             ReadInteraction.EncodeRequest([new AttributePath(1, ThermostatCluster.ClusterId, null)]));
         var reports = dispatcher.Read(paths);
 
-        // Thermostat seeds 3 attributes (local temp, heating setpoint, system mode).
-        Assert.Equal(3, reports.Count);
+        // The wildcard returns the 3 seeded attributes plus the 6 Matter global attributes.
         Assert.All(reports, r => Assert.Equal(ThermostatCluster.ClusterId, r.Path.Cluster));
+        foreach (var id in new[] { ThermostatCluster.LocalTemperatureId, ThermostatCluster.OccupiedHeatingSetpointId, ThermostatCluster.SystemModeId })
+            Assert.Contains(reports, r => r.Path.Attribute == id);
+        Assert.Contains(reports, r => r.Path.Attribute == Cluster.AttributeListId); // globals present too
     }
 
     [Fact]

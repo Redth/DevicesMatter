@@ -144,7 +144,7 @@ public class CapstoneCommissioningTests
             {
                 ib.EnterContainer((ref TlvReader cmdData) =>           // InvokeResponseIB
                 {
-                    if (cmdData.TagNumber != 1 || !cmdData.IsContainer) return; // CommandDataIB
+                    if (cmdData.TagNumber != 0 || !cmdData.IsContainer) return; // CommandDataIB (command [0])
                     cmdData.EnterContainer((ref TlvReader g) =>
                     {
                         if (g.TagNumber == 1 && g.IsContainer)          // CommandFields

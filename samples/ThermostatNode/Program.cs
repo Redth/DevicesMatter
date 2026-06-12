@@ -31,9 +31,11 @@ const ushort productId = 0x8001;
 var node = new Node();
 node.AddEndpoint(0, DeviceType.RootNode)
     .AddCluster(new BasicInformationCluster(vendorId, "MatterDevice.NET", productId, "Pool Heater", "MD-0001"))
-    .AddCluster(new GeneralCommissioningCluster());
+    .AddCluster(new GeneralCommissioningCluster())
+    .AddCluster(new OperationalCredentialsCluster());
 var thermostat = new ThermostatCluster { LocalTemperatureCentiC = 2880, OccupiedHeatingSetpointCentiC = 2944 };
 node.AddEndpoint(1, DeviceType.Thermostat).AddCluster(thermostat);
+node.AddDescriptors(); // Descriptor cluster on every endpoint (commissioner enumerates the node)
 log.LogInformation("Thermostat: water {Water:0.0} °C, setpoint {Set:0.0} °C",
     thermostat.LocalTemperatureCentiC / 100.0, thermostat.OccupiedHeatingSetpointCentiC / 100.0);
 

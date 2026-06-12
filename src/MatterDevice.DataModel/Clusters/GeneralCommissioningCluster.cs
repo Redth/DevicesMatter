@@ -23,12 +23,18 @@ public sealed class GeneralCommissioningCluster : Cluster
     public const uint CommissioningCompleteId = 0x04;
     public const uint CommissioningCompleteResponseId = 0x05;
 
+    public const uint BasicCommissioningInfoId = 0x0001;
+
     public GeneralCommissioningCluster() : base(ClusterId, "General Commissioning")
     {
         Set(BreadcrumbId, 0UL);
+        // BasicCommissioningInfo { 0: FailSafeExpiryLengthSeconds, 1: MaxCumulativeFailsafeSeconds }
+        Set(BasicCommissioningInfoId, new TlvStruct().Add(0, (ushort)60).Add(1, (ushort)900));
         Set(RegulatoryConfigId, (byte)RegulatoryLocationType.IndoorOutdoor);
         Set(LocationCapabilityId, (byte)RegulatoryLocationType.IndoorOutdoor);
         Set(SupportsConcurrentConnectionId, true);
+        AcceptedCommands = [ArmFailSafeId, SetRegulatoryConfigId, CommissioningCompleteId];
+        GeneratedCommands = [ArmFailSafeResponseId, SetRegulatoryConfigResponseId, CommissioningCompleteResponseId];
     }
 
     /// <summary>Commissioning progress marker the commissioner sets on each step (Matter §11.9.6).</summary>

@@ -36,9 +36,9 @@ public static class InvokeInteraction
     // InvokeResponseMessage tags
     private const int TagInvokeResponses = 1;
 
-    // InvokeResponseIB / CommandStatusIB / StatusIB tags
-    private const int TagStatus = 0;          // InvokeResponseIB → CommandStatusIB
-    private const int TagCommandData = 1;     // InvokeResponseIB → CommandDataIB (response with fields)
+    // InvokeResponseIB / CommandStatusIB / StatusIB tags (Matter Core Spec §10.6.12: command[0], status[1])
+    private const int TagCommandData = 0;     // InvokeResponseIB → CommandDataIB (response with fields)
+    private const int TagStatus = 1;          // InvokeResponseIB → CommandStatusIB
     private const int TagCsCommandPath = 0;   // CommandStatusIB → CommandPathIB
     private const int TagCsStatus = 1;        // CommandStatusIB → StatusIB
     private const int TagStatusCode = 0;      // StatusIB → Status

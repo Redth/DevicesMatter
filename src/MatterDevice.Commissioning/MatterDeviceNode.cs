@@ -181,13 +181,34 @@ public sealed class MatterDeviceNode
     private CommandResult DispatchCommand(InvokedCommand cmd, SecureSession session) => cmd.Path.Cluster switch
     {
         OperationalCredentialsClusterId => HandleOpCredsCommand(cmd, session),
-        GeneralCommissioningCluster.ClusterId => new CommandResult(cmd.Path, ImStatus.Success), // arm/complete are no-ops here
+        GeneralCommissioningCluster.ClusterId => HandleGeneralCommissioningCommand(cmd),
         _ => _options.ApplicationCommandHandler is { } h
             ? _dispatcher.Invoke([cmd], h)[0]
             : new CommandResult(cmd.Path, ImStatus.UnsupportedCommand),
     };
 
     private const uint OperationalCredentialsClusterId = 0x003E;
+
+    /// <summary>ArmFailSafe / SetRegulatoryConfig / CommissioningComplete → their *Response with errorCode = OK.</summary>
+    private static CommandResult HandleGeneralCommissioningCommand(InvokedCommand cmd)
+    {
+        // each request command id maps to its response id (request + 1); response = { 0: errorCode, 1: debugText }
+        uint? responseId = cmd.Path.Command switch
+        {
+            GeneralCommissioningCluster.ArmFailSafeId => GeneralCommissioningCluster.ArmFailSafeResponseId,
+            GeneralCommissioningCluster.SetRegulatoryConfigId => GeneralCommissioningCluster.SetRegulatoryConfigResponseId,
+            GeneralCommissioningCluster.CommissioningCompleteId => GeneralCommissioningCluster.CommissioningCompleteResponseId,
+            _ => null,
+        };
+        if (responseId is null)
+            return new CommandResult(cmd.Path, ImStatus.UnsupportedCommand);
+
+        return ResponseCommand(cmd.Path, responseId.Value, w =>
+        {
+            w.WriteUInt(TlvTag.ContextSpecific(0), (byte)CommissioningError.Ok);
+            w.WriteString(TlvTag.ContextSpecific(1), "");
+        });
+    }
 
     private CommandResult HandleOpCredsCommand(InvokedCommand cmd, SecureSession session)
     {
@@ -225,10 +246,13 @@ public sealed class MatterDeviceNode
             case 0x06: // AddNOC
             {
                 var (status, fabricIndex) = _commissioning!.HandleAddNoc(fields.Bytes(0), fields.Bytes(2));
+                if (status == NodeOperationalCertStatus.Ok && fabricIndex is { } idx)
+                    OperationalCredentialsClusterOnRoot()?.OnFabricAdded(idx);
                 return ResponseCommand(cmd.Path, 0x08, w =>
                 {
                     w.WriteUInt(TlvTag.ContextSpecific(0), (byte)status);
                     if (fabricIndex is { } fi) w.WriteUInt(TlvTag.ContextSpecific(1), fi);
+                    w.WriteString(TlvTag.ContextSpecific(2), ""); // debugText
                 });
             }
             default:
@@ -238,6 +262,10 @@ public sealed class MatterDeviceNode
 
     private static CommandResult ResponseCommand(CommandPath path, uint responseCommandId, Action<TlvWriter> writeFields) =>
         new(path, ImStatus.Success) { ResponseCommandId = responseCommandId, WriteResponseFields = writeFields };
+
+    private OperationalCredentialsCluster? OperationalCredentialsClusterOnRoot() =>
+        _options.DataModel.Endpoints.FirstOrDefault(e => e.Id == 0)?
+            .Clusters.OfType<OperationalCredentialsCluster>().FirstOrDefault();
 
     private byte[] Reply(MatterMessage request, SecureChannelOpcode opcode, byte[] payload, bool requiresAck)
     {
