@@ -33,6 +33,11 @@ Against the `ThermostatNode` sample, **matter.js 0.15.6 commissions the device e
   accepts matter.js's NOC).
 - ✅ **CASE** (operational reconnect) — Sigma1/2/3 complete; *"Successfully reconnected with device."*
 - ✅ **CommissioningComplete** — `errorCode 0` over the operational CASE session.
+- ✅ **Interview** — matter.js reads the entire data model via a chunked `*/*/*` wildcard read.
+- ✅ **Subscribe** — subscription initialized; live `localTemperature` reports delivered.
+- ✅ **Read + write** — `Read localTemperature`, `Write occupiedHeatingSetpoint = 30 °C` (device applies it).
+
+→ `🎉 FULLY OPERATIONAL — commissioned, interviewed, subscribed, read + wrote attributes.`
 
 A third-party controller commissioning a pure-.NET Matter device with no shared code — the strongest
 possible validation. Several real bugs were found and fixed by diffing against matter.js: the CASE S2K

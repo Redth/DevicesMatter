@@ -38,9 +38,12 @@ Real bugs found and fixed by diffing against matter.js along the way: the CASE *
 `status[1]`); the **NOC `extKeyUsage`** was dropped on re-encode; the **DN OID arcs** (icac `.1.3`, rcac
 `.1.4`). The DER conversion is pinned by KATs against matter.js's actual root + NOC certs.
 
-Remaining for full *operational* use (not commissioning): **SubscribeRequest** support (matter.js's
-post-commission interview keeps a live subscription), CHIP **production** attestation certs (for
-Apple/Google, vs. our placeholder/test path), and persistence across restarts.
+**Update — fully operational.** Writes, subscriptions, report chunking, and the Access Control cluster are
+now done, and matter.js drives the device end to end: it **interviews** (reads the whole data model via a
+chunked `*/*/*`), **subscribes** (live attribute reports), and **reads + writes** attributes (control
+applied). See [`02-building-devices.md`](02-building-devices.md). Remaining items are productization
+(CHIP **production** attestation certs for Apple/Google, persistence across restarts, MRP hardening,
+multi-fabric, more clusters) — engineering breadth + CSA certification, not protocol unknowns.
 
 ## Earlier interop checkpoint (superseded by the above)
 

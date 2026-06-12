@@ -6,15 +6,14 @@ A pure-C#/.NET implementation of the **device / bridge side** of the
 Alexa, and Home Assistant can commission and control directly over IP, with **no HomeBridge and no
 C++/Node sidecar**.
 
-> **Status: ✅ matter.js — an independent Matter controller — fully commissions the device.** The whole
-> journey runs against a real third-party controller over UDP: mDNS discovery → PASE/SPAKE2+ → encrypted
-> Interaction-Model reads → ArmFailSafe → device attestation → CSR → AddNOC (X.509-DER cert chain
-> validated) → CASE → CommissioningComplete → `🎉 COMMISSIONED`. See
-> [`tools/interop-controller`](tools/interop-controller) to reproduce it. The full stack is also proven
-> in-process with 47 tests, crypto pinned to CHIP/spec/matter.js known-answer vectors.
-> [`docs/01-milestone1-progress.md`](docs/01-milestone1-progress.md) tracks what's next (operational
-> subscriptions, CHIP production attestation certs); [`docs/00-feasibility.md`](docs/00-feasibility.md)
-> has the verdict; [`BRIEF.md`](BRIEF.md) the mission.
+> **Status: ✅ a real controller (matter.js) drives the device end to end — fully operational.** Over
+> UDP, with no shared code: mDNS discovery → PASE/SPAKE2+ → device attestation → CSR → AddNOC (X.509-DER
+> cert chain validated) → CASE → CommissioningComplete → **interview** (reads the whole data model via
+> chunked `*/*/*`) → **subscribe** (live attribute reports) → **read + write** attributes (control). The
+> stack is also proven in-process with 50 tests, crypto pinned to CHIP/spec/matter.js known-answer vectors.
+> See [`tools/interop-controller`](tools/interop-controller) to reproduce it, and
+> [`docs/02-building-devices.md`](docs/02-building-devices.md) to build your own device.
+> [`docs/00-feasibility.md`](docs/00-feasibility.md) has the verdict; [`BRIEF.md`](BRIEF.md) the mission.
 
 ## What works today (all proven end-to-end)
 
