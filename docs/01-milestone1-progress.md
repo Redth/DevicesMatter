@@ -25,7 +25,24 @@ with crypto primitives pinned to CHIP/spec known-answer vectors.
 The `ThermostatNode` sample is a runnable device: it advertises over mDNS, prints the QR + manual code,
 and accepts the complete commissioning flow through one `ProcessDatagram` entry point.
 
-## Interop-validated against matter.js (an independent controller) — 2026-06
+## ✅ matter.js fully commissions the device — 2026-06
+
+**Milestone 1 is achieved.** The real [matter.js](https://github.com/project-chip/matter.js) controller
+(no shared code) commissions the `ThermostatNode` sample end to end and prints
+`🎉 COMMISSIONED — nodeId …`: mDNS discovery → PASE → `GetInitialData` reads → ArmFailSafe → device
+attestation → CSRRequest → AddTrustedRoot + **AddNOC (statusCode 0)** → **CASE** operational reconnect →
+**CommissioningComplete (errorCode 0)**. See [`../tools/interop-controller`](../tools/interop-controller).
+
+Real bugs found and fixed by diffing against matter.js along the way: the CASE **S2K salt** includes
+`SHA256(Sigma1)` (research had said it didn't); **InvokeResponseIB** tags were swapped (`command[0]`,
+`status[1]`); the **NOC `extKeyUsage`** was dropped on re-encode; the **DN OID arcs** (icac `.1.3`, rcac
+`.1.4`). The DER conversion is pinned by KATs against matter.js's actual root + NOC certs.
+
+Remaining for full *operational* use (not commissioning): **SubscribeRequest** support (matter.js's
+post-commission interview keeps a live subscription), CHIP **production** attestation certs (for
+Apple/Google, vs. our placeholder/test path), and persistence across restarts.
+
+## Earlier interop checkpoint (superseded by the above)
 
 Tested with the real [matter.js](https://github.com/project-chip/matter.js) controller (no shared code);
 see [`../tools/interop-controller`](../tools/interop-controller). Confirmed working over real UDP:

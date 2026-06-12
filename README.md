@@ -6,13 +6,15 @@ A pure-C#/.NET implementation of the **device / bridge side** of the
 Alexa, and Home Assistant can commission and control directly over IP, with **no HomeBridge and no
 C++/Node sidecar**.
 
-> **Status: the full device-side commissioning stack is built and proven end-to-end** (44 tests).
-> A commissioner can drive the whole journey — PASE → encrypted attestation/CSR/AddNOC → CASE → encrypted
-> Interaction-Model reads — through one orchestrator, in-process and over UDP. Crypto is pinned to CHIP/spec
-> known-answer vectors. What remains for byte-level interop with a live controller (the X.509-DER cert
-> signature domain, CHIP test attestation certs, a couple of clusters, mDNS hardening) is tracked in
-> [`docs/01-milestone1-progress.md`](docs/01-milestone1-progress.md). See
-> [`docs/00-feasibility.md`](docs/00-feasibility.md) for the verdict; [`BRIEF.md`](BRIEF.md) for the mission.
+> **Status: ✅ matter.js — an independent Matter controller — fully commissions the device.** The whole
+> journey runs against a real third-party controller over UDP: mDNS discovery → PASE/SPAKE2+ → encrypted
+> Interaction-Model reads → ArmFailSafe → device attestation → CSR → AddNOC (X.509-DER cert chain
+> validated) → CASE → CommissioningComplete → `🎉 COMMISSIONED`. See
+> [`tools/interop-controller`](tools/interop-controller) to reproduce it. The full stack is also proven
+> in-process with 47 tests, crypto pinned to CHIP/spec/matter.js known-answer vectors.
+> [`docs/01-milestone1-progress.md`](docs/01-milestone1-progress.md) tracks what's next (operational
+> subscriptions, CHIP production attestation certs); [`docs/00-feasibility.md`](docs/00-feasibility.md)
+> has the verdict; [`BRIEF.md`](BRIEF.md) the mission.
 
 ## What works today (all proven end-to-end)
 
