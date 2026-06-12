@@ -38,14 +38,25 @@ public sealed class Node
 public sealed class Endpoint(ushort id, DeviceType deviceType)
 {
     private readonly List<Cluster> _clusters = [];
+    private readonly List<DeviceType> _deviceTypes = [deviceType];
 
     public ushort Id { get; } = id;
     public DeviceType DeviceType { get; } = deviceType;
+
+    /// <summary>All device types this endpoint realizes (e.g. a bridged thermostat is [Bridged Node, Thermostat]).</summary>
+    public IReadOnlyList<DeviceType> DeviceTypes => _deviceTypes;
     public IReadOnlyList<Cluster> Clusters => _clusters;
 
     public Endpoint AddCluster(Cluster cluster)
     {
         _clusters.Add(cluster);
+        return this;
+    }
+
+    /// <summary>Adds an additional device type to this endpoint's Descriptor (e.g. Bridged Node for a bridged device).</summary>
+    public Endpoint AddDeviceType(DeviceType deviceType)
+    {
+        _deviceTypes.Add(deviceType);
         return this;
     }
 }
@@ -58,6 +69,8 @@ public readonly record struct DeviceType(uint Id, string Name)
     public static readonly DeviceType BridgedNode = new(0x0013, "Bridged Node");
     public static readonly DeviceType Thermostat = new(0x0301, "Thermostat");
     public static readonly DeviceType TemperatureSensor = new(0x0302, "Temperature Sensor");
+    public static readonly DeviceType OnOffPlugInUnit = new(0x010A, "On/Off Plug-in Unit");
+    public static readonly DeviceType Pump = new(0x0303, "Pump");
 }
 
 /// <summary>

@@ -16,8 +16,9 @@ public sealed class DescriptorCluster : Cluster
 
     public DescriptorCluster(Endpoint endpoint, IReadOnlyList<ushort> partsList) : base(ClusterId, "Descriptor")
     {
-        // DeviceTypeList: array of { 0: deviceType, 1: revision }
-        Set(DeviceTypeListId, new TlvArray([new TlvStruct().Add(0, (ulong)endpoint.DeviceType.Id).Add(1, (ushort)1)]));
+        // DeviceTypeList: array of { 0: deviceType, 1: revision } — all device types the endpoint realizes
+        Set(DeviceTypeListId, new TlvArray(
+            endpoint.DeviceTypes.Select(object (dt) => new TlvStruct().Add(0, (ulong)dt.Id).Add(1, (ushort)1))));
         // ServerList: every cluster present on this endpoint (plus this Descriptor, added last)
         Set(ServerListId, new TlvArray(endpoint.Clusters.Select(c => c.Id).Append(ClusterId).Distinct().Select(object (id) => (ulong)id)));
         Set(ClientListId, new TlvArray());
