@@ -1,0 +1,52 @@
+name: Release
+
+# Packs the src/ libraries and publishes them to GitHub Packages (NuGet) on a version tag, e.g. v0.1.0.
+# The tag dictates the package version. Uses the built-in GITHUB_TOKEN (packages: write) — no secrets.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Package version to publish (e.g. 0.1.0-alpha)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Resolve version
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack
+        run: |
+          for proj in src/*/*.csproj; do
+            echo "::group::pack $proj"
+            dotnet pack "$proj" -c Release -p:Version='${{ steps.v.outputs.version }}' -p:IncludeSymbols=false
+            echo "::endgroup::"
+          done
+
+      - name: Publish to GitHub Packages
+        run: |
+          dotnet nuget push "artifacts/package/release/*.nupkg" \
+            --source "https://nuget.pkg.github.com/Redth/index.json" \
+            --api-key "${{ secrets.GITHUB_TOKEN }}" \
+            --skip-duplicate

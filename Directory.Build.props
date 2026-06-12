@@ -23,8 +23,8 @@
   <PropertyGroup>
     <Authors>redth</Authors>
     <Product>MatterDevice.NET</Product>
-    <PackageProjectUrl>https://github.com/redth/MatterDevice.NET</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/redth/MatterDevice.NET</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/Redth/DevicesMatter</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Redth/DevicesMatter</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
