@@ -75,6 +75,7 @@ public abstract class Cluster(uint id, string name)
     public const uint ClusterRevisionId = 0xFFFD;
 
     private readonly Dictionary<uint, object?> _attributes = [];
+    private readonly HashSet<uint> _writable = [];
 
     public uint Id { get; } = id;
     public string Name { get; } = name;
@@ -83,7 +84,59 @@ public abstract class Cluster(uint id, string name)
     protected uint[] AcceptedCommands { get; set; } = [];
     protected uint[] GeneratedCommands { get; set; } = [];
 
+    /// <summary>Increments on any attribute change; controllers use it for subscription/report dedup.</summary>
+    public uint DataVersion { get; private set; } = 1;
+
+    /// <summary>Raised when an attribute value changes (carries the changed attribute id).</summary>
+    public event Action<Cluster, uint>? AttributeChanged;
+
+    /// <summary>Sets an attribute's initial value (no change event; for construction).</summary>
     protected void Set(uint attributeId, object? value) => _attributes[attributeId] = value;
+
+    /// <summary>Marks an attribute writable by a controller (WriteRequest).</summary>
+    protected void MarkWritable(params uint[] attributeIds)
+    {
+        foreach (var id in attributeIds) _writable.Add(id);
+    }
+
+    public bool IsWritable(uint attributeId) => _writable.Contains(attributeId);
+
+    /// <summary>
+    /// Sets an attribute and notifies subscribers (bumps <see cref="DataVersion"/> + raises
+    /// <see cref="AttributeChanged"/>). Device code calls this to push live updates (sensor readings, etc.).
+    /// </summary>
+    public void SetAttribute(uint attributeId, object? value)
+    {
+        if (_attributes.TryGetValue(attributeId, out var existing) && Equals(existing, value))
+            return;
+        _attributes[attributeId] = value;
+        DataVersion++;
+        AttributeChanged?.Invoke(this, attributeId);
+    }
+
+    /// <summary>
+    /// Applies a controller write to an attribute. Override to validate / react; the default accepts a
+    /// write to any attribute marked <see cref="MarkWritable"/> and rejects the rest.
+    /// </summary>
+    public virtual WriteStatus WriteAttribute(uint attributeId, object? value)
+    {
+        if (!IsWritable(attributeId))
+            return WriteStatus.UnsupportedWrite;
+        SetAttribute(attributeId, CoerceToExisting(attributeId, value));
+        return WriteStatus.Success;
+    }
+
+    /// <summary>Coerces an incoming write value to the existing attribute's CLR type (e.g. a TLV int → short).</summary>
+    protected object? CoerceToExisting(uint attributeId, object? value)
+    {
+        if (value is null || _attributes.GetValueOrDefault(attributeId) is not { } existing)
+            return value;
+        var target = existing.GetType();
+        if (value.GetType() == target)
+            return value;
+        try { return target.IsEnum ? Enum.ToObject(target, value) : Convert.ChangeType(value, target); }
+        catch { return value; }
+    }
 
     public object? Get(uint attributeId) => attributeId switch
     {
@@ -111,4 +164,14 @@ public abstract class Cluster(uint id, string name)
     private IEnumerable<uint> AttributeIds() =>
         _attributes.Keys.Concat([FeatureMapId, ClusterRevisionId, AttributeListId,
             AcceptedCommandListId, GeneratedCommandListId, EventListId]);
+}
+
+/// <summary>Result of a controller attribute write (Matter Core Spec §8.10 status subset).</summary>
+public enum WriteStatus : byte
+{
+    Success = 0x00,
+    UnsupportedAttribute = 0x86,
+    UnsupportedWrite = 0x88,
+    ConstraintError = 0x87,
+    InvalidValue = 0x89,
 }

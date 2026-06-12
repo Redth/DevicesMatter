@@ -139,4 +139,51 @@ public class InteractionModelTests
         Assert.True(found.HasValue, "No data element found in ReportData.");
         return found!.Value;
     }
+
+    [Fact]
+    public void Write_updates_writable_attribute_and_rejects_read_only()
+    {
+        var node = BuildThermostatNode(out var thermostat);
+        var dispatcher = new InteractionDispatcher(node);
+
+        var request = WriteInteraction.EncodeRequest(
+        [
+            (new AttributePath(1, ThermostatCluster.ClusterId, ThermostatCluster.OccupiedHeatingSetpointId), (w, t) => w.WriteInt(t, 2900)),
+            (new AttributePath(1, ThermostatCluster.ClusterId, ThermostatCluster.LocalTemperatureId), (w, t) => w.WriteInt(t, 9999)),
+        ]);
+        var results = dispatcher.Write(WriteInteraction.DecodeRequest(request));
+
+        Assert.Equal(WriteStatus.Success, results[0].Status);
+        Assert.Equal((short)2900, thermostat.OccupiedHeatingSetpointCentiC); // applied + coerced to short
+        Assert.Equal(WriteStatus.UnsupportedWrite, results[1].Status);       // LocalTemperature is read-only
+    }
+
+    [Fact]
+    public void Write_out_of_range_setpoint_is_constraint_error()
+    {
+        var node = BuildThermostatNode(out var thermostat);
+        var dispatcher = new InteractionDispatcher(node);
+        var before = thermostat.OccupiedHeatingSetpointCentiC;
+
+        var request = WriteInteraction.EncodeRequest(
+            [(new AttributePath(1, ThermostatCluster.ClusterId, ThermostatCluster.OccupiedHeatingSetpointId), (w, t) => w.WriteInt(t, 9000))]);
+        var results = dispatcher.Write(WriteInteraction.DecodeRequest(request));
+
+        Assert.Equal(WriteStatus.ConstraintError, results[0].Status);
+        Assert.Equal(before, thermostat.OccupiedHeatingSetpointCentiC);      // unchanged
+    }
+
+    [Fact]
+    public void SetAttribute_bumps_data_version_and_fires_change()
+    {
+        var node = BuildThermostatNode(out var thermostat);
+        uint? changed = null;
+        var v0 = thermostat.DataVersion;
+        thermostat.AttributeChanged += (_, id) => changed = id;
+
+        thermostat.SetAttribute(ThermostatCluster.LocalTemperatureId, (short)3010);
+
+        Assert.Equal(ThermostatCluster.LocalTemperatureId, changed);
+        Assert.True(thermostat.DataVersion > v0);
+    }
 }

@@ -146,12 +146,18 @@ public sealed class MatterDeviceNode
         {
             ImOpcode.ReadRequest => HandleRead(msg.Payload),
             ImOpcode.InvokeRequest => HandleInvoke(msg.Payload, session),
+            ImOpcode.WriteRequest => HandleWrite(msg.Payload),
             _ => null,
         };
         if (responsePayload is null)
             return [];
 
-        var responseOpcode = (ImOpcode)msg.Opcode == ImOpcode.ReadRequest ? ImOpcode.ReportData : ImOpcode.InvokeResponse;
+        var responseOpcode = (ImOpcode)msg.Opcode switch
+        {
+            ImOpcode.ReadRequest => ImOpcode.ReportData,
+            ImOpcode.WriteRequest => ImOpcode.WriteResponse,
+            _ => ImOpcode.InvokeResponse,
+        };
         var reply = new MatterMessage
         {
             IsInitiator = false,
@@ -170,6 +176,14 @@ public sealed class MatterDeviceNode
     {
         var reports = _dispatcher.Read(ReadInteraction.DecodeRequest(payload));
         return ReadInteraction.EncodeReport(reports);
+    }
+
+    private byte[] HandleWrite(byte[] payload)
+    {
+        var results = _dispatcher.Write(WriteInteraction.DecodeRequest(payload));
+        _log.LogInformation("← WriteRequest ({Count} attr) → {Statuses}", results.Count,
+            string.Join(",", results.Select(r => $"{r.Path.Cluster:X}/{r.Path.Attribute:X}={r.Status}")));
+        return WriteInteraction.EncodeResponse(results);
     }
 
     private byte[] HandleInvoke(byte[] payload, SecureSession session)

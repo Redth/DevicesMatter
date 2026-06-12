@@ -31,12 +31,28 @@ public sealed class InteractionDispatcher(Node node)
                         if (path.Attribute is { } a && a != attrId) continue;
                         var concretePath = new AttributePath(ep.Id, cluster.Id, attrId);
                         var captured = value;
-                        reports.Add(new AttributeReport(concretePath, (w, tag) => WriteValue(w, tag, captured)));
+                        reports.Add(new AttributeReport(concretePath, (w, tag) => WriteValue(w, tag, captured), cluster.DataVersion));
                     }
                 }
             }
         }
         return reports;
+    }
+
+    /// <summary>Applies controller attribute writes to the data model, returning a status per write.</summary>
+    public IReadOnlyList<AttributeWriteResult> Write(IReadOnlyList<AttributeWrite> writes)
+    {
+        var results = new List<AttributeWriteResult>();
+        foreach (var write in writes)
+        {
+            var ep = _node.Endpoints.FirstOrDefault(e => e.Id == write.Path.Endpoint);
+            var cluster = ep?.Clusters.FirstOrDefault(c => c.Id == write.Path.Cluster);
+            var status = cluster is null || write.Path.Attribute is not { } attr
+                ? WriteStatus.UnsupportedAttribute
+                : cluster.WriteAttribute(attr, write.Value);
+            results.Add(new AttributeWriteResult(write.Path, status));
+        }
+        return results;
     }
 
     /// <summary>Dispatches InvokeRequest commands to <paramref name="handler"/>, mapping unknown paths to status errors.</summary>

@@ -20,6 +20,17 @@ public sealed class ThermostatCluster : Cluster
         LocalTemperatureCentiC = 0;
         OccupiedHeatingSetpointCentiC = 2000; // 20.00 °C
         SystemMode = ThermostatSystemMode.Heat;
+        // A controller may set the heating setpoint and the system mode.
+        MarkWritable(OccupiedHeatingSetpointId, SystemModeId);
+    }
+
+    /// <summary>Validates writes: the heating setpoint must be a sane 5–35 °C (500–3500 centi-°C).</summary>
+    public override WriteStatus WriteAttribute(uint attributeId, object? value)
+    {
+        if (attributeId == OccupiedHeatingSetpointId &&
+            Convert.ToInt64(value) is < 500 or > 3500)
+            return WriteStatus.ConstraintError;
+        return base.WriteAttribute(attributeId, value);
     }
 
     /// <summary>Measured temperature in 0.01 °C units.</summary>
