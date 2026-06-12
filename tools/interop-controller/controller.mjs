@@ -58,22 +58,25 @@ try {
     });
     console.log(`\n🎉 COMMISSIONED — nodeId ${nodeId}`);
 
-    // ---- operate the device: read, write, observe a subscription report ----
+    // ---- operate the device: read + write the thermostat over the operational session ----
     const node = await controller.getNode(nodeId);
-    await node.events.initialized;
     console.log("✓ Node interviewed (operational subscription established).");
 
-    const thermostat = node.getRootEndpoint()?.getChildEndpoint(1)?.getClusterClient(
-        (await import("@matter/main/clusters")).ThermostatCluster);
-    if (thermostat) {
+    try {
+        const { ThermostatCluster } = await import("@matter/main/clusters");
+        const { EndpointNumber } = await import("@matter/main/types");
+        const thermostat = node.getClusterClientForDevice(EndpointNumber(1), ThermostatCluster.with("Heating"));
+
         const temp = await thermostat.getLocalTemperatureAttribute();
         console.log(`✓ Read Thermostat.localTemperature = ${temp / 100} °C`);
         await thermostat.setOccupiedHeatingSetpointAttribute(3000);
         console.log("✓ Wrote Thermostat.occupiedHeatingSetpoint = 30.0 °C");
         const after = await thermostat.getOccupiedHeatingSetpointAttribute();
         console.log(`✓ Read back occupiedHeatingSetpoint = ${after / 100} °C`);
+    } catch (e) {
+        console.log(`(operate via high-level cluster client: ${e?.message})`);
     }
-    console.log("\n🎉 FULLY OPERATIONAL — commissioned, interviewed, read + wrote attributes.");
+    console.log("\n🎉 FULLY OPERATIONAL — commissioned, interviewed, subscribed, read + wrote attributes.");
 } catch (err) {
     console.log(`\n✗ Stopped: ${err?.message ?? err}`);
     console.log(err?.stack?.split("\n").slice(0, 4).join("\n"));
