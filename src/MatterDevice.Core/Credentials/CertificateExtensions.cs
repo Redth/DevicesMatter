@@ -21,6 +21,7 @@ public sealed class CertificateExtensions
     public bool IsCa { get; set; }
     public uint? PathLengthConstraint { get; set; }
     public ushort KeyUsage { get; set; }
+    public IReadOnlyList<uint> ExtendedKeyUsage { get; set; } = [];
     public byte[]? SubjectKeyId { get; set; }      // 20 bytes
     public byte[]? AuthorityKeyId { get; set; }    // 20 bytes
 
@@ -66,6 +67,11 @@ public sealed class CertificateExtensions
                     ext.PathLengthConstraint = captured.PathLen;
                     break;
                 case TagKeyUsage: ext.KeyUsage = (ushort)f.GetUInt(); break;
+                case TagExtendedKeyUsage when f.IsContainer:
+                    var ekus = new List<uint>();
+                    f.EnterContainer((ref TlvReader e) => ekus.Add((uint)e.GetUInt()));
+                    ext.ExtendedKeyUsage = ekus;
+                    break;
                 case TagSubjectKeyId: ext.SubjectKeyId = f.GetBytes().ToArray(); break;
                 case TagAuthorityKeyId: ext.AuthorityKeyId = f.GetBytes().ToArray(); break;
             }

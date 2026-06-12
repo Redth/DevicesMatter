@@ -27,6 +27,9 @@ public sealed class MatterDistinguishedName
 {
     private readonly List<(DnAttributeType Type, ulong IntValue, string? StringValue)> _attributes = [];
 
+    /// <summary>The DN attributes in order (type, integer value for Matter ids, or string value).</summary>
+    public IReadOnlyList<(DnAttributeType Type, ulong IntValue, string? StringValue)> Attributes => _attributes;
+
     public MatterDistinguishedName AddMatterId(DnAttributeType type, ulong value)
     {
         _attributes.Add((type, value, null));

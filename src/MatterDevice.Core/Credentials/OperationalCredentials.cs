@@ -78,13 +78,17 @@ public static class OperationalCredentials
         return cert;
     }
 
-    /// <summary>Signs a certificate's to-be-signed bytes with the issuer key, populating <see cref="MatterCertificate.Signature"/>.</summary>
+    /// <summary>
+    /// Signs a certificate with the issuer key over its <b>X.509 DER TBSCertificate</b> — the same signature
+    /// domain every Matter implementation uses, so the certs we generate and the certs a real controller
+    /// sends both validate the same way.
+    /// </summary>
     public static void Sign(MatterCertificate cert, P256KeyPair issuerKey) =>
-        cert.Signature = issuerKey.Sign(cert.EncodeToBeSigned());
+        cert.Signature = issuerKey.Sign(MatterCertificateDer.EncodeTbsCertificate(cert));
 
-    /// <summary>Verifies a certificate's signature against an issuer public key (over the TBS TLV bytes).</summary>
+    /// <summary>Verifies a certificate's signature against an issuer public key, over the X.509 DER TBSCertificate.</summary>
     public static bool VerifySignature(MatterCertificate cert, ReadOnlySpan<byte> issuerPublicKey) =>
-        P256.Verify(issuerPublicKey, cert.EncodeToBeSigned(), cert.Signature);
+        MatterCertificateDer.VerifySignature(cert, issuerPublicKey);
 
     /// <summary>
     /// Validates that <paramref name="noc"/> chains to <paramref name="root"/> on the expected fabric:
