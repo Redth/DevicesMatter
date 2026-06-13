@@ -58,6 +58,7 @@ var device = new MatterDeviceNode(new MatterDeviceOptions
     Attestation = new DeviceAttestationProvider(dacKey,
         RandomNumberGenerator.GetBytes(64), RandomNumberGenerator.GetBytes(64), RandomNumberGenerator.GetBytes(128)),
     DataModel = node,
+    FabricStore = new MatterDevice.Commissioning.Persistence.FileFabricStore("./thermostat-fabrics.json"),
 }, loggerFactory.CreateLogger<MatterDeviceNode>());
 
 // ── Onboarding payload → QR + manual pairing code. ──────────────────────────────────────────────────
@@ -97,6 +98,10 @@ device.FabricCommissioned += fabric =>
         fabric.FabricId, operational.InstanceName);
     _ = mdns.AdvertiseAsync(operational);
 };
+
+// Restore any fabrics persisted from a previous run, so already-paired controllers reconnect via CASE
+// without re-commissioning (raises FabricCommissioned above for each → re-advertises operational).
+device.RestoreFabrics();
 
 using var cts = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };

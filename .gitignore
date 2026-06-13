@@ -422,3 +422,6 @@ FodyWeavers.xsd
 # Local secrets / credentials
 .env
 **/.env
+
+# Local fabric persistence written by samples/tests
+*-fabrics.json

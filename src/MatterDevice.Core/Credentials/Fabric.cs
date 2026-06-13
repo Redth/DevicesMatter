@@ -46,6 +46,13 @@ public sealed class FabricTable
         return index;
     }
 
+    /// <summary>Re-inserts a fabric loaded from storage at its original index (keeping the next index ahead).</summary>
+    public void Restore(Fabric fabric)
+    {
+        _fabrics[fabric.FabricIndex] = fabric;
+        if (fabric.FabricIndex >= _nextIndex) _nextIndex = (byte)(fabric.FabricIndex + 1);
+    }
+
     public Fabric? Get(byte fabricIndex) => _fabrics.GetValueOrDefault(fabricIndex);
     public IReadOnlyCollection<Fabric> All => _fabrics.Values;
     public int Count => _fabrics.Count;

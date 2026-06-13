@@ -30,7 +30,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <Version>0.1.0-alpha</Version>
+    <Version>0.2.0-alpha</Version>
   </PropertyGroup>
 
 </Project>

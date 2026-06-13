@@ -22,6 +22,9 @@ public sealed class MatterDeviceOptions
     public required DeviceAttestationProvider Attestation { get; init; }
     public required Node DataModel { get; init; }
     public CommandHandler? ApplicationCommandHandler { get; init; }
+
+    /// <summary>Optional fabric persistence — when set, commissioned pairings survive restarts.</summary>
+    public Persistence.IFabricStore? FabricStore { get; init; }
 }
 
 /// <summary>
@@ -75,8 +78,30 @@ public sealed class MatterDeviceNode
     public FabricTable Fabrics => _fabrics;
     public IReadOnlyCollection<SecureSession> Sessions => _sessions.Active;
 
-    /// <summary>Raised when a fabric is committed via AddNOC — the host can begin operational advertising.</summary>
+    /// <summary>Raised when a fabric is committed via AddNOC <em>or restored from storage</em> — the host
+    /// can begin operational advertising for it.</summary>
     public event Action<Fabric>? FabricCommissioned;
+
+    /// <summary>
+    /// Loads any persisted fabrics from <see cref="MatterDeviceOptions.FabricStore"/> into the live table and
+    /// raises <see cref="FabricCommissioned"/> for each, so the host advertises them operationally and already
+    /// paired controllers reconnect via CASE without re-commissioning. Call once at startup, after wiring
+    /// <see cref="FabricCommissioned"/>.
+    /// </summary>
+    public void RestoreFabrics()
+    {
+        if (_options.FabricStore is null) return;
+        var restored = _options.FabricStore.Load();
+        foreach (var fabric in restored)
+        {
+            _fabrics.Restore(fabric);
+            OperationalCredentialsClusterOnRoot()?.OnFabricAdded(fabric.FabricIndex);
+            _log.LogInformation("Restored fabric {Index} (node 0x{Node:X16}) from storage", fabric.FabricIndex, fabric.NodeId);
+            FabricCommissioned?.Invoke(fabric);
+        }
+        if (restored.Count > 0)
+            _log.LogInformation("Restored {Count} fabric(s) — paired controllers can reconnect without re-pairing.", restored.Count);
+    }
 
     /// <summary>
     /// Processes one inbound datagram and returns the response datagram(s). <paramref name="peer"/> is an
@@ -112,20 +137,27 @@ public sealed class MatterDeviceNode
                 var localId = _sessions.AllocateLocalSessionId();
                 _pase = new PaseResponder(_options.Passcode, _options.PaseSalt, _options.PaseIterations, localId);
                 _commissioning = new DeviceCommissioning(_options.Attestation, _fabrics);
-                _log.LogInformation("← PBKDFParamRequest (local session {Id})", localId);
+                _log.LogInformation("← PBKDFParamRequest (local session {Id}, counter {Ctr}, requiresAck {Ack}, {Len} bytes)",
+                    localId, msg.MessageCounter, msg.RequiresAck, msg.Payload.Length);
                 var resp = _pase.OnPbkdfParamRequest(msg.Payload);
+                _log.LogInformation("→ PBKDFParamResponse");
                 return [Reply(msg, SecureChannelOpcode.PbkdfParamResponse, resp.Encode(), requiresAck: true)];
             }
             case SecureChannelOpcode.PasePake1:
             {
+                _log.LogInformation("← Pake1  → Pake2");
                 var pake2 = _pase!.OnPake1(msg.Payload);
                 return [Reply(msg, SecureChannelOpcode.PasePake2, pake2.Encode(), requiresAck: true)];
             }
             case SecureChannelOpcode.PasePake3:
             {
+                _log.LogInformation("← Pake3");
                 var paseSession = _pase!.OnPake3(msg.Payload);
                 if (paseSession is null)
+                {
+                    _log.LogWarning("Pake3 confirmation failed (passcode/transcript mismatch) — sending failure StatusReport");
                     return [Reply(msg, SecureChannelOpcode.StatusReport, StatusReport.Failure(SecureChannelStatusCode.InvalidParameter).Encode(), false)];
+                }
                 _sessions.Add(new SecureSession
                 {
                     LocalSessionId = paseSession.LocalSessionId,
@@ -462,6 +494,7 @@ public sealed class MatterDeviceNode
                     OperationalCredentialsClusterOnRoot()?.OnFabricAdded(idx);
                     if (_fabrics.Get(idx) is { } fabric)
                         FabricCommissioned?.Invoke(fabric);
+                    _options.FabricStore?.Save(_fabrics.All); // persist so the pairing survives restarts
                 }
                 return ResponseCommand(cmd.Path, 0x08, w =>
                 {
@@ -500,6 +533,7 @@ public sealed class MatterDeviceNode
         return reply.Encode();
     }
 
-    private uint _unsecuredCounter = 1;
+    // Per Matter §4.5.1.1 the unsecured (global) message counter starts at a random value.
+    private uint _unsecuredCounter = System.BitConverter.ToUInt32(System.Security.Cryptography.RandomNumberGenerator.GetBytes(4));
     private uint NextUnsecuredCounter() => _unsecuredCounter++;
 }
