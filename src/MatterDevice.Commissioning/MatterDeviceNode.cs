@@ -137,8 +137,8 @@ public sealed class MatterDeviceNode
                 var localId = _sessions.AllocateLocalSessionId();
                 _pase = new PaseResponder(_options.Passcode, _options.PaseSalt, _options.PaseIterations, localId);
                 _commissioning = new DeviceCommissioning(_options.Attestation, _fabrics);
-                _log.LogInformation("← PBKDFParamRequest (local session {Id}, counter {Ctr}, requiresAck {Ack}, {Len} bytes)",
-                    localId, msg.MessageCounter, msg.RequiresAck, msg.Payload.Length);
+                _log.LogInformation("← PBKDFParamRequest (local session {Id}, counter {Ctr}, requiresAck {Ack}, srcNodeId {Src}, {Len} bytes)",
+                    localId, msg.MessageCounter, msg.RequiresAck, msg.SourceNodeId is { } s ? s.ToString("X16") : "none", msg.Payload.Length);
                 var resp = _pase.OnPbkdfParamRequest(msg.Payload);
                 _log.LogInformation("→ PBKDFParamResponse");
                 return [Reply(msg, SecureChannelOpcode.PbkdfParamResponse, resp.Encode(), requiresAck: true)];
@@ -528,6 +528,9 @@ public sealed class MatterDeviceNode
             Opcode = (byte)opcode,
             ExchangeId = request.ExchangeId,
             ProtocolId = MatterProtocolId.SecureChannel,
+            // Echo the initiator's ephemeral source node id as our destination so it can match the reply to
+            // its unsecured session (required by strict commissioners e.g. Apple Home; matter.js is lenient).
+            DestinationNodeId = request.SourceNodeId,
             Payload = payload,
         };
         return reply.Encode();
