@@ -49,6 +49,6 @@ public sealed class SecureSession
         return message.EncodeSecure(EncryptKey);
     }
 
-    /// <summary>Decrypts an inbound message for this session.</summary>
-    public MatterMessage Decode(ReadOnlySpan<byte> data) => MatterMessage.DecodeSecure(data, DecryptKey);
+    /// <summary>Decrypts an inbound message for this session (peer node id fills the nonce when omitted).</summary>
+    public MatterMessage Decode(ReadOnlySpan<byte> data) => MatterMessage.DecodeSecure(data, DecryptKey, PeerNodeId);
 }

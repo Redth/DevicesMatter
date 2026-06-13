@@ -113,12 +113,12 @@ public sealed class MatterMessage
     /// The 13-byte AEAD nonce (Matter Core Spec §4.7.2): security flags ‖ message counter (LE) ‖ source
     /// node id (LE). For a message with no source node id, zero is used.
     /// </summary>
-    public byte[] BuildNonce()
+    public byte[] BuildNonce(ulong? sourceOverride = null)
     {
         var nonce = new byte[13];
         nonce[0] = SecurityFlags;
         BinaryPrimitives.WriteUInt32LittleEndian(nonce.AsSpan(1), MessageCounter);
-        BinaryPrimitives.WriteUInt64LittleEndian(nonce.AsSpan(5), SourceNodeId ?? 0);
+        BinaryPrimitives.WriteUInt64LittleEndian(nonce.AsSpan(5), sourceOverride ?? SourceNodeId ?? 0);
         return nonce;
     }
 
@@ -135,11 +135,11 @@ public sealed class MatterMessage
     /// followed by AES-CCM(protocol header ‖ payload) ‖ tag, with AAD = the message header and the nonce
     /// built from this message's security flags / counter / source node id.
     /// </summary>
-    public byte[] EncodeSecure(ReadOnlySpan<byte> key)
+    public byte[] EncodeSecure(ReadOnlySpan<byte> key, ulong? nonceSourceOverride = null)
     {
         var header = EncodeMessageHeader();
         var inner = EncodeProtocolPayload();
-        var sealed_ = MatterAead.Encrypt(key, BuildNonce(), inner, header);
+        var sealed_ = MatterAead.Encrypt(key, BuildNonce(nonceSourceOverride), inner, header);
 
         var output = new byte[header.Length + sealed_.Length];
         header.CopyTo(output, 0);
@@ -151,12 +151,18 @@ public sealed class MatterMessage
     /// Parses and decrypts a secure-session frame with <paramref name="key"/>. Throws if the
     /// authentication tag does not verify.
     /// </summary>
-    public static MatterMessage DecodeSecure(ReadOnlySpan<byte> data, ReadOnlySpan<byte> key)
+    /// <remarks>
+    /// <paramref name="peerNodeIdForNonce"/> is the sender's operational node id, used in the AEAD nonce when
+    /// the message header omits the Source Node ID. Operational (CASE) messages normally leave it out and rely
+    /// on the session's peer node id; without it, decryption fails (matter.js includes the id; Apple omits it).
+    /// </remarks>
+    public static MatterMessage DecodeSecure(ReadOnlySpan<byte> data, ReadOnlySpan<byte> key, ulong peerNodeIdForNonce = 0)
     {
         var (msg, headerLen) = DecodeMessageHeader(data);
         var header = data[..headerLen];
         var ciphertextAndTag = data[headerLen..];
-        var plaintext = MatterAead.Decrypt(key, msg.BuildNonce(), ciphertextAndTag, header);
+        var nonce = msg.BuildNonce(msg.SourceNodeId is null ? peerNodeIdForNonce : null);
+        var plaintext = MatterAead.Decrypt(key, nonce, ciphertextAndTag, header);
         msg.ParseProtocolPayload(plaintext);
         return msg;
     }

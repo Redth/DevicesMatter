@@ -83,6 +83,38 @@ public class SecureMessageTests
         Assert.Throws<AeadAuthenticationException>(() => MatterMessage.DecodeSecure(wire, i2r));
     }
 
+    [Fact]
+    public void Operational_message_without_source_node_id_decrypts_using_peer_node_id()
+    {
+        // Spec-compliant operational (CASE) senders omit the Source Node ID from the header and build the
+        // AEAD nonce from their own operational node id; the receiver fills it from the session's peer node
+        // id. This is the Apple Home case — Apple omits it where matter.js includes it.
+        var key = EstablishSessionKey(out _);
+        const ulong senderNodeId = 0x0011223344556677UL;
+
+        var msg = new MatterMessage
+        {
+            SessionId = 0x2002,
+            MessageCounter = 123,
+            SecurityFlags = 0,
+            Opcode = 0x02,
+            ExchangeId = 0x33,
+            ProtocolId = MatterProtocolId.InteractionModel,
+            Payload = [0x15, 0x18],
+            // SourceNodeId intentionally null → the header omits it.
+        };
+        var wire = msg.EncodeSecure(key, nonceSourceOverride: senderNodeId);
+
+        // With the peer node id supplied, the nonce matches and it decrypts.
+        var decoded = MatterMessage.DecodeSecure(wire, key, peerNodeIdForNonce: senderNodeId);
+        Assert.Equal(msg.Payload, decoded.Payload);
+        Assert.Null(decoded.SourceNodeId);
+
+        // Without it (the old behaviour — nonce source 0) the tag fails. This is exactly the "Decrypt failed"
+        // Apple Home hit on the operational session.
+        Assert.Throws<AeadAuthenticationException>(() => MatterMessage.DecodeSecure(wire, key));
+    }
+
     /// <summary>Runs a real PASE handshake and returns the I2R key (and R2I via out) for these tests.</summary>
     private static byte[] EstablishSessionKey(out byte[] r2i)
     {

@@ -101,7 +101,7 @@ public class CapstoneCommissioningTests
         // ---- 5. read the thermostat over the encrypted CASE session ----
         var (caseI2r, caseR2i, _) = caseInitiator.SessionKeys!.Value;
         var operationalSession = new Commissioner(device);
-        operationalSession.OpenSecure(sigma2Decoded.ResponderSessionId, encryptKey: caseI2r, decryptKey: caseR2i);
+        operationalSession.OpenSecure(sigma2Decoded.ResponderSessionId, encryptKey: caseI2r, decryptKey: caseR2i, nonceNodeId: CommissionerNodeId);
 
         var readRequest = ReadInteraction.EncodeRequest(
             [new AttributePath(1, ThermostatClusterId, ThermostatCluster.LocalTemperatureId)]);
@@ -163,12 +163,14 @@ public class CapstoneCommissioningTests
         private uint _counter = 1;
         private ushort _sessionId;
         private byte[]? _encryptKey, _decryptKey;
+        private ulong _nonceNodeId; // initiator's operational node id for the AEAD nonce (0 over PASE)
 
-        public void OpenSecure(ushort deviceSessionId, byte[] encryptKey, byte[] decryptKey)
+        public void OpenSecure(ushort deviceSessionId, byte[] encryptKey, byte[] decryptKey, ulong nonceNodeId = 0)
         {
             _sessionId = deviceSessionId;
             _encryptKey = encryptKey;
             _decryptKey = decryptKey;
+            _nonceNodeId = nonceNodeId;
         }
 
         public MatterMessage SendUnsecured(SecureChannelOpcode opcode, byte[] payload, MatterProtocolId protocol)
@@ -191,7 +193,9 @@ public class CapstoneCommissioningTests
                 IsInitiator = true, RequiresAck = true,
                 Opcode = (byte)opcode, ExchangeId = _exchangeId++, ProtocolId = protocol, Payload = payload,
             };
-            var responses = _device.ProcessDatagram(msg.EncodeSecure(_encryptKey!));
+            // Omit the Source Node ID from the header and put the operational node id only in the nonce —
+            // the spec-compliant (Apple Home) behaviour the device must handle.
+            var responses = _device.ProcessDatagram(msg.EncodeSecure(_encryptKey!, _nonceNodeId == 0 ? null : _nonceNodeId));
             return MatterMessage.DecodeSecure(Assert.Single(responses), _decryptKey!);
         }
     }

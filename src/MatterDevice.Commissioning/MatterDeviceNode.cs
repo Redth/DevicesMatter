@@ -200,7 +200,7 @@ public sealed class MatterDeviceNode
         if (peer is not null) session.Peer = peer;
 
         MatterMessage msg;
-        try { msg = MatterMessage.DecodeSecure(datagram, session.DecryptKey); }
+        try { msg = MatterMessage.DecodeSecure(datagram, session.DecryptKey, session.PeerNodeId); }
         catch (Core.Crypto.AeadAuthenticationException) { _log.LogWarning("Decrypt failed for session {Id}", localSessionId); return []; }
 
         if (session.AcceptInbound(msg.MessageCounter) == MessageReceptionState.Result.Duplicate)
