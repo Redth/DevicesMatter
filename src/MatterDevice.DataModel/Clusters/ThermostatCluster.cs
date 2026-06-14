@@ -11,15 +11,35 @@ public sealed class ThermostatCluster : Cluster
 
     // Attribute IDs (Matter Application Cluster Spec, Thermostat).
     public const uint LocalTemperatureId = 0x0000;
+    public const uint AbsMinHeatSetpointLimitId = 0x0003;
+    public const uint AbsMaxHeatSetpointLimitId = 0x0004;
     public const uint OccupiedCoolingSetpointId = 0x0011;
     public const uint OccupiedHeatingSetpointId = 0x0012;
+    public const uint MinHeatSetpointLimitId = 0x0015;
+    public const uint MaxHeatSetpointLimitId = 0x0016;
+    public const uint ControlSequenceOfOperationId = 0x001B;
     public const uint SystemModeId = 0x001C;
+
+    // Heat setpoint range the device honors (centi-°C); matches the WriteAttribute clamp below.
+    private const short MinHeatCentiC = 500;  //  5.00 °C
+    private const short MaxHeatCentiC = 3500;  // 35.00 °C
 
     public ThermostatCluster() : base(ClusterId, "Thermostat")
     {
         FeatureMap = 0x01; // Heating — makes OccupiedHeatingSetpoint feature-conformant
         LocalTemperatureCentiC = 0;
         OccupiedHeatingSetpointCentiC = 2000; // 20.00 °C
+
+        // Mandatory attributes that controllers rely on. Apple Home, in particular, only enables the
+        // Off/Heat mode control — and actually writes SystemMode — when ControlSequenceOfOperation is
+        // present; without it the mode toggle is inert (the temperature dial still works). The heat
+        // setpoint limits bound that dial.
+        Set(AbsMinHeatSetpointLimitId, MinHeatCentiC);
+        Set(AbsMaxHeatSetpointLimitId, MaxHeatCentiC);
+        Set(MinHeatSetpointLimitId, MinHeatCentiC);
+        Set(MaxHeatSetpointLimitId, MaxHeatCentiC);
+        Set(ControlSequenceOfOperationId, (byte)ThermostatControlSequence.HeatingOnly);
+
         SystemMode = ThermostatSystemMode.Heat;
         // A controller may set the heating setpoint and the system mode.
         MarkWritable(OccupiedHeatingSetpointId, SystemModeId);
@@ -62,4 +82,12 @@ public enum ThermostatSystemMode : byte
     Auto = 1,
     Cool = 3,
     Heat = 4,
+}
+
+/// <summary>Thermostat ControlSequenceOfOperation enum (subset) — which heating/cooling modes the unit runs.</summary>
+public enum ThermostatControlSequence : byte
+{
+    CoolingOnly = 0,
+    HeatingOnly = 2,
+    CoolingAndHeating = 4,
 }
