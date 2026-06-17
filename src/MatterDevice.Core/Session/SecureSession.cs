@@ -32,11 +32,17 @@ public sealed class SecureSession
     /// <summary>An opaque transport token for the peer (e.g. its UDP endpoint), used to push async reports.</summary>
     public object? Peer { get; set; }
 
-    private uint _outboundCounter = (BitConverter.ToUInt32(RandomNumberGenerator.GetBytes(4)) >> 4) + 1;
+    private int _outboundCounter = unchecked((int)((BitConverter.ToUInt32(RandomNumberGenerator.GetBytes(4)) >> 4) + 1));
     private readonly MessageReceptionState _reception = new();
 
-    /// <summary>The next outbound message counter for this session.</summary>
-    public uint NextOutboundCounter() => _outboundCounter++;
+    /// <summary>
+    /// The next outbound message counter for this session. Atomic: <see cref="Encode"/> is called
+    /// concurrently — the receive thread encodes a Write/Invoke response while fire-and-forget
+    /// subscription-report tasks (and the periodic report loop) encode on the same session. A non-atomic
+    /// increment would hand two messages the same counter; the peer dedups by counter and drops one,
+    /// so a dropped Write/Invoke response leaves the controller thinking its command never landed.
+    /// </summary>
+    public uint NextOutboundCounter() => unchecked((uint)Interlocked.Increment(ref _outboundCounter));
 
     /// <summary>Classifies an inbound counter for de-duplication.</summary>
     public MessageReceptionState.Result AcceptInbound(uint counter) => _reception.Process(counter);

@@ -9,6 +9,23 @@ namespace MatterDevice.Tests;
 public class SessionTests
 {
     [Fact]
+    public async Task Outbound_counter_is_unique_under_concurrent_encode()
+    {
+        // Encode runs concurrently (receive thread response + async subscription-report tasks). A
+        // non-atomic counter would hand two messages the same value, the peer dedups, and a response is
+        // silently dropped. Assert every counter from many parallel callers is distinct.
+        var session = new SecureSession { LocalSessionId = 1, PeerSessionId = 2, DecryptKey = new byte[16], EncryptKey = new byte[16] };
+        const int total = 50_000;
+        var counters = new uint[total];
+        await Parallel.ForEachAsync(Enumerable.Range(0, total), (i, _) =>
+        {
+            counters[i] = session.NextOutboundCounter();
+            return ValueTask.CompletedTask;
+        });
+        Assert.Equal(total, counters.Distinct().Count());
+    }
+
+    [Fact]
     public void Reception_window_accepts_new_and_rejects_replays()
     {
         var state = new MessageReceptionState();
