@@ -385,8 +385,20 @@ public sealed class MatterDeviceNode
     private async Task PublishChangedAsync(ushort endpointId, uint clusterId)
     {
         List<Subscription> affected;
+        int total;
         lock (_subGate)
+        {
+            total = _subscriptions.Count;
             affected = _subscriptions.Where(s => s.Paths.Any(p => Covers(p, endpointId, clusterId))).ToList();
+        }
+        if (affected.Count == 0)
+        {
+            // No subscriber will hear this change proactively — a controller (e.g. Apple Home) that's
+            // waiting to see its write reflected on a subscription will time out and revert the control.
+            _log.LogInformation("Attr change on {Ep}/0x{Cl:X} — no covering subscription ({Total} active); no proactive report sent.",
+                endpointId, clusterId, total);
+            return;
+        }
         foreach (var sub in affected)
             await SendSubscriptionReportAsync(sub, default).ConfigureAwait(false);
     }
@@ -400,9 +412,15 @@ public sealed class MatterDeviceNode
     private async Task SendSubscriptionReportAsync(Subscription sub, CancellationToken ct)
     {
         if (SendDatagram is null || sub.Session.Peer is not { } peer)
+        {
+            _log.LogInformation("Subscription {SubId} report skipped — session {Sid} has no peer endpoint yet.",
+                sub.Id, sub.Session.LocalSessionId);
             return;
+        }
 
         var reports = _dispatcher.Read(sub.Paths);
+        _log.LogInformation("→ ReportData to session {Sid} (subscription {SubId}, {N} attr).",
+            sub.Session.LocalSessionId, sub.Id, reports.Count);
         var report = new MatterMessage
         {
             IsInitiator = true,
