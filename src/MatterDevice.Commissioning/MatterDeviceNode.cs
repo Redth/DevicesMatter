@@ -202,17 +202,20 @@ public sealed class MatterDeviceNode
         if (session is null)
         {
             // Expected after a restart: a peer is still using a secure session from before we restarted
-            // (sessions are in-memory; only fabrics persist). We can't decrypt it, and replying to an
-            // undecryptable message is a DoS/amplification vector — so drop it. The peer's reliable-
-            // messaging will give up and re-establish a fresh CASE session. Log once per stale session id
-            // rather than once per retransmit, so it doesn't look like a flood of errors.
+            // (sessions are in-memory; only fabrics persist). We can't decrypt it. Rather than silently
+            // drop it and let the peer wait out its reliable-messaging retransmit timeout (during which its
+            // writes are lost), reply once with a Secure Channel StatusReport(SessionNotFound) — the
+            // spec-defined signal telling it to drop the dead session and re-establish via CASE now.
+            // Sent at most once per stale session id (deduped below), so a spoofed/garbage session id can't
+            // be used as a reflection/amplification vector.
             if (!_loggedUnknownSession || _lastUnknownSessionId != localSessionId)
             {
                 _log.LogInformation(
-                    "Ignoring message for unknown session {Id} (likely a peer's pre-restart session; it will re-establish via CASE).",
+                    "Unknown session {Id} (peer's pre-restart session) — replying SessionNotFound so it re-establishes via CASE now.",
                     localSessionId);
                 _lastUnknownSessionId = localSessionId;
                 _loggedUnknownSession = true;
+                return [SessionNotFoundReport()];
             }
             return [];
         }
@@ -533,6 +536,23 @@ public sealed class MatterDeviceNode
     private OperationalCredentialsCluster? OperationalCredentialsClusterOnRoot() =>
         _options.DataModel.Endpoints.FirstOrDefault(e => e.Id == 0)?
             .Clusters.OfType<OperationalCredentialsCluster>().FirstOrDefault();
+
+    /// <summary>
+    /// An unsecured Secure Channel StatusReport(SessionNotFound), sent to a peer still using a session we
+    /// lost across a restart so it tears the dead session down and re-establishes via CASE immediately
+    /// instead of waiting out its retransmit timeout. Rate-limited by the caller to once per stale session.
+    /// </summary>
+    private byte[] SessionNotFoundReport() => new MatterMessage
+    {
+        SessionId = 0,
+        MessageCounter = NextUnsecuredCounter(),
+        IsInitiator = true,
+        RequiresAck = false,
+        Opcode = (byte)SecureChannelOpcode.StatusReport,
+        ExchangeId = NextExchangeId(),
+        ProtocolId = MatterProtocolId.SecureChannel,
+        Payload = StatusReport.Failure(SecureChannelStatusCode.SessionNotFound).Encode(),
+    }.Encode();
 
     private byte[] Reply(MatterMessage request, SecureChannelOpcode opcode, byte[] payload, bool requiresAck)
     {

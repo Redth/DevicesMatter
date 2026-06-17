@@ -110,6 +110,46 @@ public class CapstoneCommissioningTests
         Assert.Equal(2880L, Assert.IsType<long>(reported[0].Value));
     }
 
+    [Fact]
+    public void Unknown_session_gets_one_SessionNotFound_then_silence()
+    {
+        // A peer still using a session from before we restarted: we can't decrypt it, but instead of
+        // silently dropping (leaving the peer to wait out its retransmit timeout) we answer once with a
+        // SessionNotFound StatusReport so it re-establishes via CASE now. Deduped so retransmits stay quiet.
+        var node = new Node();
+        node.AddEndpoint(0, DeviceType.RootNode);
+        node.AddEndpoint(1, DeviceType.Thermostat).AddCluster(new ThermostatCluster());
+        var device = new MatterDeviceNode(new MatterDeviceOptions
+        {
+            Passcode = Passcode,
+            PaseSalt = RandomNumberGenerator.GetBytes(16),
+            Attestation = new DeviceAttestationProvider(P256KeyPair.Generate(),
+                RandomNumberGenerator.GetBytes(64), RandomNumberGenerator.GetBytes(64), RandomNumberGenerator.GetBytes(128)),
+            DataModel = node,
+        });
+
+        static byte[] StaleDatagram(ushort sessionId) => new MatterMessage
+        {
+            SessionId = sessionId,
+            IsInitiator = true,
+            Opcode = (byte)ImOpcode.ReadRequest,
+            ProtocolId = MatterProtocolId.InteractionModel,
+            ExchangeId = 1,
+            MessageCounter = 7,
+            Payload = [1, 2, 3],
+        }.EncodeSecure(new byte[16]);
+
+        var reply = MatterMessage.Decode(Assert.Single(device.ProcessDatagram(StaleDatagram(0x2710))));
+        Assert.Equal(MatterProtocolId.SecureChannel, reply.ProtocolId);
+        Assert.Equal((byte)SecureChannelOpcode.StatusReport, reply.Opcode);
+        var status = StatusReport.Decode(reply.Payload);
+        Assert.Equal(GeneralStatusCode.Failure, status.GeneralStatus);
+        Assert.Equal((ushort)SecureChannelStatusCode.SessionNotFound, status.ProtocolCode);
+
+        // Same stale session id again → no reply (so retransmits can't be used for reflection).
+        Assert.Empty(device.ProcessDatagram(StaleDatagram(0x2710)));
+    }
+
     private static MatterMessage InvokeOpCreds(Commissioner c, uint commandId, Action<TlvWriter> writeFields)
     {
         var command = new InvokedCommand(new CommandPath(0, 0x003E, commandId),
