@@ -193,10 +193,29 @@ public sealed class MatterDeviceNode
 
     // ---- secure session: Interaction Model ------------------------------
 
+    private ushort _lastUnknownSessionId;
+    private bool _loggedUnknownSession;
+
     private IReadOnlyList<byte[]> ProcessSecure(ushort localSessionId, byte[] datagram, object? peer)
     {
         var session = _sessions.Find(localSessionId);
-        if (session is null) { _log.LogWarning("No session {Id}", localSessionId); return []; }
+        if (session is null)
+        {
+            // Expected after a restart: a peer is still using a secure session from before we restarted
+            // (sessions are in-memory; only fabrics persist). We can't decrypt it, and replying to an
+            // undecryptable message is a DoS/amplification vector — so drop it. The peer's reliable-
+            // messaging will give up and re-establish a fresh CASE session. Log once per stale session id
+            // rather than once per retransmit, so it doesn't look like a flood of errors.
+            if (!_loggedUnknownSession || _lastUnknownSessionId != localSessionId)
+            {
+                _log.LogInformation(
+                    "Ignoring message for unknown session {Id} (likely a peer's pre-restart session; it will re-establish via CASE).",
+                    localSessionId);
+                _lastUnknownSessionId = localSessionId;
+                _loggedUnknownSession = true;
+            }
+            return [];
+        }
         if (peer is not null) session.Peer = peer;
 
         MatterMessage msg;
