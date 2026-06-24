@@ -67,6 +67,28 @@ public class InteractionModelTests
     }
 
     [Fact]
+    public void Temperature_sensor_reports_measured_value_and_range()
+    {
+        var node = new Node();
+        var sensor = new TemperatureMeasurementCluster();
+        node.AddEndpoint(1, DeviceType.TemperatureSensor).AddCluster(sensor);
+        sensor.MeasuredValueCentiC = 2340; // 23.40 °C
+
+        var dispatcher = new InteractionDispatcher(node);
+        var reports = dispatcher.Read(ReadInteraction.DecodeRequest(
+            ReadInteraction.EncodeRequest([new AttributePath(1, TemperatureMeasurementCluster.ClusterId, null)])));
+
+        foreach (var id in new[]
+                 {
+                     TemperatureMeasurementCluster.MeasuredValueId,
+                     TemperatureMeasurementCluster.MinMeasuredValueId,
+                     TemperatureMeasurementCluster.MaxMeasuredValueId,
+                 })
+            Assert.Contains(reports, r => r.Path.Attribute == id);
+        Assert.Equal((short)2340, Assert.IsType<short>(sensor.Get(TemperatureMeasurementCluster.MeasuredValueId)));
+    }
+
+    [Fact]
     public void Thermostat_exposes_mandatory_mode_and_limit_attributes()
     {
         // Apple Home only enables the Off/Heat mode control (and writes SystemMode) when these mandatory
