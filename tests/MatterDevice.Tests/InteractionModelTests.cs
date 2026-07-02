@@ -67,6 +67,28 @@ public class InteractionModelTests
     }
 
     [Fact]
+    public void Fan_control_exposes_mode_and_percent_and_validates_writes()
+    {
+        var node = new Node();
+        var fan = new FanControlCluster();
+        node.AddEndpoint(1, DeviceType.Fan).AddCluster(fan);
+        var dispatcher = new InteractionDispatcher(node);
+
+        // A controller sets the target speed.
+        Assert.Equal(WriteStatus.Success, fan.WriteAttribute(FanControlCluster.PercentSettingId, 60));
+        Assert.Equal((byte)60, fan.PercentSetting);
+        // Out-of-range percents are rejected.
+        Assert.Equal(WriteStatus.ConstraintError, fan.WriteAttribute(FanControlCluster.PercentSettingId, 150));
+        // Mode is writable; sequence + current are present.
+        Assert.Equal(WriteStatus.Success, fan.WriteAttribute(FanControlCluster.FanModeId, (byte)FanMode.Off));
+        var reports = dispatcher.Read(ReadInteraction.DecodeRequest(
+            ReadInteraction.EncodeRequest([new AttributePath(1, FanControlCluster.ClusterId, null)])));
+        foreach (var id in new[] { FanControlCluster.FanModeId, FanControlCluster.FanModeSequenceId,
+                     FanControlCluster.PercentSettingId, FanControlCluster.PercentCurrentId })
+            Assert.Contains(reports, r => r.Path.Attribute == id);
+    }
+
+    [Fact]
     public void Temperature_sensor_reports_measured_value_and_range()
     {
         var node = new Node();

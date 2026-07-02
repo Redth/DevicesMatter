@@ -71,6 +71,7 @@ public readonly record struct DeviceType(uint Id, string Name)
     public static readonly DeviceType TemperatureSensor = new(0x0302, "Temperature Sensor");
     public static readonly DeviceType OnOffPlugInUnit = new(0x010A, "On/Off Plug-in Unit");
     public static readonly DeviceType Pump = new(0x0303, "Pump");
+    public static readonly DeviceType Fan = new(0x002B, "Fan");
 }
 
 /// <summary>
