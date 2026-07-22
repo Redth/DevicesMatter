@@ -19,6 +19,7 @@ public sealed class ThermostatCluster : Cluster
     public const uint MaxHeatSetpointLimitId = 0x0016;
     public const uint ControlSequenceOfOperationId = 0x001B;
     public const uint SystemModeId = 0x001C;
+    public const uint ThermostatRunningStateId = 0x0029;
 
     // Heat setpoint range the device honors (centi-°C); matches the WriteAttribute clamp below.
     private const short MinHeatCentiC = 500;  //  5.00 °C
@@ -39,6 +40,10 @@ public sealed class ThermostatCluster : Cluster
         Set(MinHeatSetpointLimitId, MinHeatCentiC);
         Set(MaxHeatSetpointLimitId, MaxHeatCentiC);
         Set(ControlSequenceOfOperationId, (byte)ThermostatControlSequence.HeatingOnly);
+
+        // The *actual* running state (bitmap) — lets a controller show "Heating" only when the unit is
+        // really firing vs "Idle" when it's on but satisfied. Apple Home maps this to its flame indicator.
+        Set(ThermostatRunningStateId, (ushort)0);
 
         SystemMode = ThermostatSystemMode.Heat;
         // A controller may set the heating setpoint and the system mode.
@@ -72,6 +77,16 @@ public sealed class ThermostatCluster : Cluster
     {
         get => (ThermostatSystemMode)(byte)(Get(SystemModeId) ?? (byte)0);
         set => Set(SystemModeId, (byte)value);
+    }
+
+    /// <summary>ThermostatRunningState bit for "heat is actively running" (§4.3.9.x).</summary>
+    public const ushort RunningStateHeatOn = 0x0001;
+
+    /// <summary>The actual running-state bitmap (0x0029) — e.g. <see cref="RunningStateHeatOn"/> when firing.</summary>
+    public ushort RunningState
+    {
+        get => (ushort)(Get(ThermostatRunningStateId) ?? (ushort)0);
+        set => SetAttribute(ThermostatRunningStateId, value);
     }
 }
 
