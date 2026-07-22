@@ -47,6 +47,15 @@ public sealed class SecureSession
     /// <summary>Classifies an inbound counter for de-duplication.</summary>
     public MessageReceptionState.Result AcceptInbound(uint counter) => _reception.Process(counter);
 
+    private long _lastActivityTicks = DateTime.UtcNow.Ticks;
+
+    /// <summary>When we last received traffic from the peer on this session — used to reap idle/dead sessions.
+    /// Only inbound activity counts (our own outbound reports must not keep a dead peer's session alive).</summary>
+    public DateTime LastActivityUtc => new(Interlocked.Read(ref _lastActivityTicks), DateTimeKind.Utc);
+
+    /// <summary>Marks the session active (call when a message from the peer is accepted).</summary>
+    public void Touch() => Interlocked.Exchange(ref _lastActivityTicks, DateTime.UtcNow.Ticks);
+
     /// <summary>Encrypts a message for this session (sets session id + counter and seals with the encrypt key).</summary>
     public byte[] Encode(MatterMessage message)
     {

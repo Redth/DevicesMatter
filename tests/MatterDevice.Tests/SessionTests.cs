@@ -65,6 +65,39 @@ public class SessionTests
             });
             Assert.True(ids.Add(id), "duplicate session id allocated");
         }
-        Assert.Equal(200, mgr.Active.Count);
+        // 200 distinct ids were allocated, but the manager caps concurrent sessions (evicting the
+        // least-recently-active) so it never leaks unboundedly.
+        Assert.Equal(200, ids.Count);
+        Assert.InRange(mgr.Active.Count, 1, 64);
+    }
+
+    [Fact]
+    public void SessionManager_evicts_prior_session_for_the_same_peer_on_reconnect()
+    {
+        var mgr = new SessionManager();
+        SecureSession Make(ushort id, ulong peer) => new()
+        {
+            LocalSessionId = id, PeerSessionId = 1, PeerNodeId = peer,
+            DecryptKey = new byte[16], EncryptKey = new byte[16],
+        };
+        mgr.Add(Make(10, peer: 0xAAAA));
+        mgr.Add(Make(11, peer: 0xBBBB));
+        // Peer 0xAAAA reconnects with a fresh session — its old one (10) must be evicted, not left to leak.
+        mgr.Add(Make(12, peer: 0xAAAA));
+        var evicted = mgr.EvictPeer(0xAAAA, exceptLocalId: 12);
+        Assert.Contains(evicted, s => s.LocalSessionId == 10);
+        Assert.Null(mgr.Find(10));
+        Assert.NotNull(mgr.Find(12)); // the new one survives
+        Assert.NotNull(mgr.Find(11)); // the other peer is untouched
+    }
+
+    [Fact]
+    public void SessionManager_reaps_idle_sessions()
+    {
+        var mgr = new SessionManager();
+        mgr.Add(new SecureSession { LocalSessionId = 7, PeerSessionId = 1, DecryptKey = new byte[16], EncryptKey = new byte[16] });
+        Assert.Empty(mgr.EvictIdle(TimeSpan.FromMinutes(5)));   // fresh — not idle
+        Assert.Single(mgr.EvictIdle(TimeSpan.FromMilliseconds(-1))); // everything older than "now+" → reaped
+        Assert.Null(mgr.Find(7));
     }
 }

@@ -12,6 +12,10 @@ public sealed class SessionManager
     private readonly Dictionary<ushort, SecureSession> _sessions = [];
     private readonly Lock _gate = new();
 
+    /// <summary>Upper bound on concurrent secure sessions; the least-recently-active are evicted past this.
+    /// Bounds the leak where each controller reconnect would otherwise add a session that never goes away.</summary>
+    private const int MaxSessions = 48;
+
     /// <summary>Allocates an unused non-zero local session id.</summary>
     public ushort AllocateLocalSessionId()
     {
@@ -27,10 +31,50 @@ public sealed class SessionManager
         }
     }
 
-    public void Add(SecureSession session)
+    /// <summary>Adds a session; if that pushes past <see cref="MaxSessions"/>, evicts the least-recently-active
+    /// (never the one just added). Returns the evicted sessions so the caller can drop their subscriptions.</summary>
+    public IReadOnlyList<SecureSession> Add(SecureSession session)
     {
         lock (_gate)
+        {
             _sessions[session.LocalSessionId] = session;
+            if (_sessions.Count <= MaxSessions) return [];
+            var evicted = _sessions.Values
+                .Where(s => s.LocalSessionId != session.LocalSessionId)
+                .OrderBy(s => s.LastActivityUtc)
+                .Take(_sessions.Count - MaxSessions)
+                .ToList();
+            foreach (var s in evicted) _sessions.Remove(s.LocalSessionId);
+            return evicted;
+        }
+    }
+
+    /// <summary>Removes any other sessions for the same peer node id — called when a controller re-establishes
+    /// CASE, so reconnects <em>replace</em> the prior session instead of piling up. Returns the evicted.</summary>
+    public IReadOnlyList<SecureSession> EvictPeer(ulong peerNodeId, ushort exceptLocalId)
+    {
+        if (peerNodeId == 0) return [];
+        lock (_gate)
+        {
+            var evicted = _sessions.Values
+                .Where(s => s.LocalSessionId != exceptLocalId && s.PeerNodeId == peerNodeId)
+                .ToList();
+            foreach (var s in evicted) _sessions.Remove(s.LocalSessionId);
+            return evicted;
+        }
+    }
+
+    /// <summary>Removes sessions with no inbound traffic for longer than <paramref name="idle"/> (dead
+    /// controllers that never said goodbye). Returns the evicted so the caller can drop their subscriptions.</summary>
+    public IReadOnlyList<SecureSession> EvictIdle(TimeSpan idle)
+    {
+        var cutoff = DateTime.UtcNow - idle;
+        lock (_gate)
+        {
+            var evicted = _sessions.Values.Where(s => s.LastActivityUtc < cutoff).ToList();
+            foreach (var s in evicted) _sessions.Remove(s.LocalSessionId);
+            return evicted;
+        }
     }
 
     public SecureSession? Find(ushort localSessionId)

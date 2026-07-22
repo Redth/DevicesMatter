@@ -118,6 +118,7 @@ public sealed class MatterDeviceNode
     /// <summary>The host calls this periodically (e.g. once a second) to emit subscription heartbeat reports.</summary>
     public async Task TickAsync(CancellationToken ct = default)
     {
+        DropSessions(_sessions.EvictIdle(SessionIdleTimeout)); // reap dead controllers + their subscriptions
         foreach (var sub in SubscriptionsDue())
             await SendSubscriptionReportAsync(sub, ct).ConfigureAwait(false);
     }
@@ -182,7 +183,12 @@ public sealed class MatterDeviceNode
                 var opSession = _case!.OnSigma3(msg.Payload);
                 if (opSession is null)
                     return [Reply(msg, SecureChannelOpcode.StatusReport, StatusReport.Failure(SecureChannelStatusCode.InvalidParameter).Encode(), false)];
-                _sessions.Add(opSession);
+                // Evict this controller's prior session (reconnects replace, not accumulate) + anything over
+                // the cap, and drop the subscriptions bound to those dead sessions — otherwise sessions and
+                // subscriptions leak forever and the device drowns reporting to thousands of dead peers.
+                var capEvicted = _sessions.Add(opSession);
+                var replaced = _sessions.EvictPeer(opSession.PeerNodeId, opSession.LocalSessionId);
+                DropSessions(capEvicted, replaced);
                 _log.LogInformation("✓ CASE operational session {Id} established", opSession.LocalSessionId);
                 return [Reply(msg, SecureChannelOpcode.StatusReport, StatusReport.SessionEstablished().Encode(), false)];
             }
@@ -225,6 +231,7 @@ public sealed class MatterDeviceNode
         try { msg = MatterMessage.DecodeSecure(datagram, session.DecryptKey, session.PeerNodeId); }
         catch (Core.Crypto.AeadAuthenticationException) { _log.LogWarning("Decrypt failed for session {Id}", localSessionId); return []; }
 
+        session.Touch(); // real inbound traffic — keeps the session out of the idle reaper
         if (session.AcceptInbound(msg.MessageCounter) == MessageReceptionState.Result.Duplicate)
             return []; // duplicate already processed
         _log.LogInformation("← secure msg: protocol {Protocol} opcode 0x{Op:X2} on session {Sid}", msg.ProtocolId, msg.Opcode, localSessionId);
@@ -361,14 +368,30 @@ public sealed class MatterDeviceNode
 
     // ---- subscriptions --------------------------------------------------
 
+    // Idle secure sessions with no inbound traffic for this long are reaped (see TickAsync).
+    private static readonly TimeSpan SessionIdleTimeout = TimeSpan.FromMinutes(5);
+
+    /// <summary>Removes the subscriptions bound to a set of just-evicted sessions (a session with no home has
+    /// no business still receiving reports).</summary>
+    private void DropSessions(params IReadOnlyList<SecureSession>[] evictedGroups)
+    {
+        var ids = evictedGroups.SelectMany(g => g).Select(s => s.LocalSessionId).ToHashSet();
+        if (ids.Count == 0) return;
+        int subs;
+        lock (_subGate) subs = _subscriptions.RemoveAll(sub => ids.Contains(sub.Session.LocalSessionId));
+        _log.LogInformation("Evicted {Sessions} stale session(s) + {Subs} subscription(s).", ids.Count, subs);
+    }
+
     private IReadOnlyList<byte[]> HandleSubscribe(MatterMessage msg, SecureSession session)
     {
         var req = SubscribeInteraction.DecodeRequest(msg.Payload);
         var maxInterval = req.MaxIntervalCeiling == 0 ? (ushort)60 : req.MaxIntervalCeiling;
         uint subId;
-        var sub = new Subscription { Id = 0, Session = session, Paths = req.Paths, MaxInterval = maxInterval, LastReportUtc = DateTime.UtcNow };
+        Subscription sub;
         lock (_subGate)
         {
+            // A controller re-subscribing on a session replaces its earlier subscription(s) — don't stack them.
+            _subscriptions.RemoveAll(s => s.Session.LocalSessionId == session.LocalSessionId);
             subId = _nextSubscriptionId++;
             sub = new Subscription { Id = subId, Session = session, Paths = req.Paths, MaxInterval = maxInterval, LastReportUtc = DateTime.UtcNow };
             _subscriptions.Add(sub);
