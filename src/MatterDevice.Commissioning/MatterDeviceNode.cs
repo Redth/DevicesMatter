@@ -280,8 +280,11 @@ public sealed class MatterDeviceNode
     // ---- read/report chunking (large ReportData split across flow-controlled messages) --------------
 
     private const int MaxReportPayloadSize = 900;
-    // Per (session, exchange): the messages still to send, each driven by the peer's next StatusResponse.
-    private readonly Dictionary<(ushort Session, ushort Exchange), Queue<(ImOpcode Opcode, byte[] Payload)>> _pendingChunks = [];
+    // Per (session, exchange, deviceInitiated): the messages still to send, each driven by the peer's next
+    // StatusResponse. The deviceInitiated flag distinguishes our proactive subscription reports (we're the
+    // exchange initiator) from replies to a peer's read/subscribe (the peer is the initiator): the same
+    // exchange id can appear in both directions, and the continuation message's initiator flag must match.
+    private readonly Dictionary<(ushort Session, ushort Exchange, bool DeviceInitiated), Queue<(ImOpcode Opcode, byte[] Payload)>> _pendingChunks = [];
 
     private IReadOnlyList<byte[]> SendReportChunks(SecureSession session, MatterMessage request, IReadOnlyList<AttributeReport> reports, uint? subscriptionId, bool isRead, byte[]? followUp = null)
     {
@@ -296,7 +299,7 @@ public sealed class MatterDeviceNode
         if (followUp is not null) queue.Enqueue((ImOpcode.SubscribeResponse, followUp));
         if (queue.Count > 0)
         {
-            lock (_subGate) _pendingChunks[(session.LocalSessionId, request.ExchangeId)] = queue;
+            lock (_subGate) _pendingChunks[(session.LocalSessionId, request.ExchangeId, false)] = queue;
             if (chunks.Count > 1) _log.LogInformation("  report split into {Chunks} chunks", chunks.Count);
         }
         return datagrams;
@@ -304,7 +307,10 @@ public sealed class MatterDeviceNode
 
     private IReadOnlyList<byte[]> ContinueChunks(SecureSession session, MatterMessage statusMsg)
     {
-        var key = (session.LocalSessionId, statusMsg.ExchangeId);
+        // The peer's StatusResponse carries the exchange's initiator flag: set when the peer initiated (acking
+        // our reply to its read/subscribe), clear when we initiated (acking our proactive subscription report).
+        var deviceInitiated = !statusMsg.IsInitiator;
+        var key = (session.LocalSessionId, statusMsg.ExchangeId, deviceInitiated);
         (ImOpcode Opcode, byte[] Payload)? next = null;
         lock (_subGate)
         {
@@ -319,7 +325,7 @@ public sealed class MatterDeviceNode
 
         var msg = new MatterMessage
         {
-            IsInitiator = false,
+            IsInitiator = deviceInitiated,
             RequiresAck = true,
             IsAck = statusMsg.RequiresAck,
             AckedMessageCounter = statusMsg.RequiresAck ? statusMsg.MessageCounter : null,
@@ -385,7 +391,13 @@ public sealed class MatterDeviceNode
         var ids = evictedGroups.SelectMany(g => g).Select(s => s.LocalSessionId).ToHashSet();
         if (ids.Count == 0) return;
         int subs;
-        lock (_subGate) subs = _subscriptions.RemoveAll(sub => ids.Contains(sub.Session.LocalSessionId));
+        lock (_subGate)
+        {
+            subs = _subscriptions.RemoveAll(sub => ids.Contains(sub.Session.LocalSessionId));
+            // Drop any half-sent chunk queues bound to those sessions so they don't leak.
+            foreach (var key in _pendingChunks.Keys.Where(k => ids.Contains(k.Session)).ToList())
+                _pendingChunks.Remove(key);
+        }
         _log.LogInformation("Evicted {Sessions} stale session(s) + {Subs} subscription(s).", ids.Count, subs);
     }
 
@@ -453,17 +465,33 @@ public sealed class MatterDeviceNode
             return;
         }
 
+        // A wildcard subscription snapshot is far bigger than one datagram, so split it exactly like a read:
+        // send the first chunk now and queue the rest, each released by the peer's StatusResponse ack (see
+        // ContinueChunks). Cramming every attribute into one oversized datagram — as this used to — meant the
+        // peer never received a decodable report, so it never acked, the session went idle with no inbound
+        // traffic, and it got reaped every ~5 minutes (and proactive attribute changes never reached it).
         var reports = _dispatcher.Read(sub.Paths);
-        _log.LogInformation("→ ReportData to session {Sid} (subscription {SubId}, {N} attr).",
-            sub.Session.LocalSessionId, sub.Id, reports.Count);
+        var chunks = ChunkReports(reports, sub.Id, isRead: false);
+        var exchangeId = NextExchangeId();
+        _log.LogInformation("→ ReportData to session {Sid} (subscription {SubId}, {N} attr{Chunked}).",
+            sub.Session.LocalSessionId, sub.Id, reports.Count,
+            chunks.Count > 1 ? $", {chunks.Count} chunks" : "");
+
+        if (chunks.Count > 1)
+        {
+            var queue = new Queue<(ImOpcode, byte[])>();
+            for (var i = 1; i < chunks.Count; i++) queue.Enqueue((ImOpcode.ReportData, chunks[i]));
+            lock (_subGate) _pendingChunks[(sub.Session.LocalSessionId, exchangeId, true)] = queue;
+        }
+
         var report = new MatterMessage
         {
             IsInitiator = true,
             RequiresAck = true,
             Opcode = (byte)ImOpcode.ReportData,
-            ExchangeId = NextExchangeId(),
+            ExchangeId = exchangeId,
             ProtocolId = MatterProtocolId.InteractionModel,
-            Payload = ReadInteraction.EncodeReport(reports, suppressResponse: false, subscriptionId: sub.Id),
+            Payload = chunks[0],
             SourceNodeId = sub.Session.LocalNodeId == 0 ? null : sub.Session.LocalNodeId,
         };
         var datagram = sub.Session.Encode(report);
