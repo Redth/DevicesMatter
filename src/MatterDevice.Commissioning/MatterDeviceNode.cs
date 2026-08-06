@@ -371,6 +371,13 @@ public sealed class MatterDeviceNode
     // Idle secure sessions with no inbound traffic for this long are reaped (see TickAsync).
     private static readonly TimeSpan SessionIdleTimeout = TimeSpan.FromMinutes(5);
 
+    // A subscription's session is only kept alive by *inbound* traffic (the controller acking our reports).
+    // So we must send a report — even a no-change heartbeat — comfortably more often than SessionIdleTimeout,
+    // or a controller that subscribed with a long MaxInterval (Apple uses 600s) and then sees no state change
+    // goes silent, its session ages out, and it gets wrongly reaped mid-subscription. Cap the heartbeat well
+    // under the idle timeout. (Sending faster than MaxInterval is spec-legal; MinInterval bounds the floor.)
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromMinutes(3);
+
     /// <summary>Removes the subscriptions bound to a set of just-evicted sessions (a session with no home has
     /// no business still receiving reports).</summary>
     private void DropSessions(params IReadOnlyList<SecureSession>[] evictedGroups)
@@ -428,8 +435,13 @@ public sealed class MatterDeviceNode
 
     private List<Subscription> SubscriptionsDue()
     {
+        // Report at least every HeartbeatInterval even when the controller asked for a longer MaxInterval,
+        // so the resulting acks keep its session out of the idle reaper (and it stays subscribed/responsive).
+        var heartbeat = HeartbeatInterval.TotalSeconds;
         lock (_subGate)
-            return _subscriptions.Where(s => (DateTime.UtcNow - s.LastReportUtc).TotalSeconds >= s.MaxInterval).ToList();
+            return _subscriptions
+                .Where(s => (DateTime.UtcNow - s.LastReportUtc).TotalSeconds >= Math.Min(s.MaxInterval, heartbeat))
+                .ToList();
     }
 
     private async Task SendSubscriptionReportAsync(Subscription sub, CancellationToken ct)
