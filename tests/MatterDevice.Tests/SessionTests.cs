@@ -48,14 +48,20 @@ public class SessionTests
     }
 
     [Fact]
-    public void SessionManager_allocates_unique_nonzero_ids()
+    public void SessionManager_allocates_nonzero_ids_unique_among_live_sessions()
     {
+        // The allocator picks a *random* non-zero id and guarantees only that it doesn't collide with a
+        // currently-live session. Reusing an id after its session was evicted is fine — a stale retransmit
+        // aimed at it fails to decrypt under the new session's keys. So we assert that live contract at every
+        // step; asserting global uniqueness across evictions (as this test used to) can't hold for a random
+        // allocator and made it flaky: past ~48 live sessions the cap evicts old ones, freeing their ids to
+        // be drawn again, and 200 draws from the ~15-bit odd-id space collide by the birthday bound ~1 in 3.
         var mgr = new SessionManager();
-        var ids = new HashSet<ushort>();
         for (var i = 0; i < 200; i++)
         {
             var id = mgr.AllocateLocalSessionId();
             Assert.NotEqual(0, id);
+            Assert.Null(mgr.Find(id)); // never hands out an id already in use by a live session
             mgr.Add(new SecureSession
             {
                 LocalSessionId = id,
@@ -63,12 +69,12 @@ public class SessionTests
                 DecryptKey = new byte[16],
                 EncryptKey = new byte[16],
             });
-            Assert.True(ids.Add(id), "duplicate session id allocated");
         }
-        // 200 distinct ids were allocated, but the manager caps concurrent sessions (evicting the
-        // least-recently-active) so it never leaks unboundedly.
-        Assert.Equal(200, ids.Count);
-        Assert.InRange(mgr.Active.Count, 1, 64);
+        // The manager caps concurrent sessions (evicting the least-recently-active) so they never leak
+        // unboundedly, and every live session has a distinct id.
+        var live = mgr.Active.Select(s => s.LocalSessionId).ToList();
+        Assert.InRange(live.Count, 1, 48);
+        Assert.Equal(live.Count, live.Distinct().Count());
     }
 
     [Fact]
