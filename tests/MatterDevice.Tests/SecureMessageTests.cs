@@ -1,3 +1,4 @@
+using MatterDevice.Testing;
 using System.Security.Cryptography;
 using MatterDevice.Commissioning.Pase;
 using MatterDevice.Core.Crypto;
@@ -120,7 +121,7 @@ public class SecureMessageTests
     {
         var salt = RandomNumberGenerator.GetBytes(16);
         var device = new PaseResponder(20202021, salt, 1000, 0x0001);
-        var prover = new TestProver(20202021);
+        var prover = new PaseInitiator(20202021);
 
         var reqBytes = prover.BuildPbkdfParamRequest();
         var respBytes = device.OnPbkdfParamRequest(reqBytes).Encode();

@@ -1,3 +1,4 @@
+using MatterDevice.Testing;
 using System.Security.Cryptography;
 using MatterDevice.Commissioning.Case;
 using MatterDevice.Commissioning.OperationalCredentials;
@@ -32,7 +33,7 @@ public class CommissioningFlowTests
         // ---------- 1. PASE: session + attestation challenge ----------
         var salt = RandomNumberGenerator.GetBytes(16);
         var pase = new PaseResponder(Passcode, salt, 1000, 0x0001);
-        var paseProver = new TestProver(Passcode);
+        var paseProver = new PaseInitiator(Passcode);
 
         var req = paseProver.BuildPbkdfParamRequest();
         var resp = pase.OnPbkdfParamRequest(req).Encode();

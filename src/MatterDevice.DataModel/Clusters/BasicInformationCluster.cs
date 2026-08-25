@@ -39,9 +39,10 @@ public sealed class BasicInformationCluster : Cluster
 
     private const int ImConstantsRevision = 17;
 
+    /// <summary>The user-visible device name. Setting it reports to subscribers.</summary>
     public string? NodeLabel
     {
         get => (string?)Get(NodeLabelId);
-        set => Set(NodeLabelId, value ?? "");
+        set => SetAttribute(NodeLabelId, value ?? "");
     }
 }

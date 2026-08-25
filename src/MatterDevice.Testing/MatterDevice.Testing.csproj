@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Controller-side drivers for testing YOUR device: PASE + CASE initiators and a
+       MatterTestController that commissions a MatterDeviceNode in-process and speaks the
+       Interaction Model to it, so device behaviour can be asserted without a real controller. -->
+
+  <PropertyGroup>
+    <Description>In-process controller harness for testing MatterDevice.NET devices — commissions a node (PASE → CSR/AddNOC → CASE) and drives reads, writes, invokes and subscriptions against it.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MatterDevice.Core\MatterDevice.Core.csproj" />
+    <ProjectReference Include="..\MatterDevice.DataModel\MatterDevice.DataModel.csproj" />
+    <ProjectReference Include="..\MatterDevice.Commissioning\MatterDevice.Commissioning.csproj" />
+  </ItemGroup>
+
+</Project>

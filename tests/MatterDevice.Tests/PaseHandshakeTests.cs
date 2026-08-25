@@ -1,3 +1,4 @@
+using MatterDevice.Testing;
 using System.Security.Cryptography;
 using MatterDevice.Commissioning.Pase;
 using MatterDevice.Core.Crypto;
@@ -22,7 +23,7 @@ public class PaseHandshakeTests
         const int iterations = 1000;
 
         var device = new PaseResponder(Passcode, salt, iterations, localSessionId: 0x1111);
-        var prover = new TestProver(Passcode);
+        var prover = new PaseInitiator(Passcode);
 
         // 1. PBKDFParamRequest → PBKDFParamResponse
         var reqBytes = prover.BuildPbkdfParamRequest();
@@ -55,7 +56,7 @@ public class PaseHandshakeTests
         const int iterations = 1000;
 
         var device = new PaseResponder(Passcode, salt, iterations, 0x2222);
-        var prover = new TestProver(passcode: 11223344); // mismatched
+        var prover = new PaseInitiator(passcode: 11223344); // mismatched
 
         var reqBytes = prover.BuildPbkdfParamRequest();
         var respBytes = device.OnPbkdfParamRequest(reqBytes).Encode();

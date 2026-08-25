@@ -1,3 +1,4 @@
+using MatterDevice.Testing;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -32,7 +33,7 @@ public class UdpCommissioningTests
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var serverTask = server.RunAsync(cts.Token);
 
-        var prover = new TestProver(Passcode);
+        var prover = new PaseInitiator(Passcode);
         using var client = new UdpClient();
         client.Connect(IPAddress.Loopback, server.BoundPort);
 

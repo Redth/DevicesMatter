@@ -37,11 +37,12 @@ public sealed class GeneralCommissioningCluster : Cluster
         GeneratedCommands = [ArmFailSafeResponseId, SetRegulatoryConfigResponseId, CommissioningCompleteResponseId];
     }
 
-    /// <summary>Commissioning progress marker the commissioner sets on each step (Matter §11.9.6).</summary>
+    /// <summary>Commissioning progress marker the commissioner sets on each step (Matter §11.9.6).
+    /// Setting it reports to subscribers.</summary>
     public ulong Breadcrumb
     {
         get => (ulong)(Get(BreadcrumbId) ?? 0UL);
-        set => Set(BreadcrumbId, value);
+        set => SetAttribute(BreadcrumbId, value);
     }
 }
 

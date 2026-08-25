@@ -2,14 +2,14 @@ using System.Security.Cryptography;
 using MatterDevice.Commissioning.Pase;
 using MatterDevice.Core.Crypto;
 
-namespace MatterDevice.Tests;
+namespace MatterDevice.Testing;
 
 /// <summary>
-/// A minimal commissioner-side PASE driver (the prover role) used by the tests to exercise the device
+/// A minimal commissioner-side PASE driver (the prover role) used to drive a device's
 /// <see cref="PaseResponder"/>. A genuine controller (chip-tool, Apple Home, Home Assistant) plays this
 /// same role on the wire.
 /// </summary>
-internal sealed class TestProver(uint passcode)
+public sealed class PaseInitiator(uint passcode)
 {
     private readonly Spake2Plus _spake = new();
     private readonly byte[] _initiatorRandom = RandomNumberGenerator.GetBytes(32);

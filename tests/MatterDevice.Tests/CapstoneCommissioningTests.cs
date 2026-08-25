@@ -10,6 +10,7 @@ using MatterDevice.Core.Tlv;
 using MatterDevice.DataModel;
 using MatterDevice.DataModel.Clusters;
 using MatterDevice.DataModel.InteractionModel;
+using MatterDevice.Testing;
 
 namespace MatterDevice.Tests;
 
@@ -49,7 +50,7 @@ public class CapstoneCommissioningTests
         });
 
         // ---- 1. PASE over the wire ----
-        var prover = new TestProver(Passcode);
+        var prover = new PaseInitiator(Passcode);
         var pase = new Commissioner(device);
 
         var reqBytes = prover.BuildPbkdfParamRequest();
@@ -168,108 +169,24 @@ public class CapstoneCommissioningTests
             thermostats.Add(t);
         }
 
-        var (device, op) = EstablishOperationalSession(node);
+        var device = MatterTestDevice.Create(node);
+        var controller = MatterTestController.Commission(device);
 
-        var outbound = new List<byte[]>();
-        device.SendDatagram = (_, dgram, _) => { outbound.Add(dgram); return Task.CompletedTask; };
+        // Subscribe to the whole node (endpoint/cluster/attribute all wildcard), as Apple Home does.
+        controller.Subscribe([new AttributePath(null, null, null)]);
 
-        // Subscribe to the whole node (endpoint/cluster/attribute all wildcard); the priming report's first
-        // chunk comes back synchronously — we only need the subscription to exist for the proactive path.
-        var subscribe = EncodeSubscribeRequest(minIntervalFloor: 0, maxIntervalCeiling: 60, new AttributePath(null, null, null));
-        op.SendSecure(ImOpcode.SubscribeRequest, subscribe, MatterProtocolId.InteractionModel);
+        // Change a subscribed attribute → the device pushes a proactive report. ReceiveReportAsync acks each
+        // chunk, so a report that arrives complete here is one a real controller would also receive complete.
+        thermostats[0].LocalTemperatureCentiC = 2999;
+        var reported = await controller.ReceiveReportAsync();
 
-        // Change a subscribed attribute → the device pushes a proactive report to the peer (via SendDatagram).
-        thermostats[0].SetAttribute(ThermostatCluster.LocalTemperatureId, (short)2999);
-        for (var i = 0; i < 200 && outbound.Count == 0; i++) await Task.Delay(5);
-
-        Assert.NotEmpty(outbound);
-        const int UdpMtu = 1280; // IPv6 minimum MTU; a Matter message is one datagram, so no report may exceed it.
-        var firstReport = op.Decode(outbound[0]);
-        Assert.Equal((byte)ImOpcode.ReportData, firstReport.Opcode);
-        Assert.True(outbound[0].Length <= UdpMtu,
-            $"proactive report was {outbound[0].Length} B — it must be chunked under the {UdpMtu} B MTU, not sent whole");
-
-        // Ack the first chunk. The device initiated this exchange, so the peer's ack is NOT the initiator —
-        // the node keys pending chunks on that flag, so this both drives the next chunk and proves the
-        // device-initiated exchange can't be confused with a reply to a peer-initiated read/subscribe.
-        var followOn = op.SendSecureExchange(ImOpcode.StatusResponse, EncodeEmptyStatusResponse(), firstReport.ExchangeId, isInitiator: false);
-        var nextDatagram = Assert.Single(followOn);
-        Assert.Equal((byte)ImOpcode.ReportData, op.Decode(nextDatagram).Opcode); // a further chunk was released
-        Assert.True(nextDatagram.Length <= UdpMtu, $"continuation chunk was {nextDatagram.Length} B — over the {UdpMtu} B MTU");
+        Assert.Contains(reported, a =>
+            a.Path.Attribute == ThermostatCluster.LocalTemperatureId && Convert.ToInt64(a.Value) == 2999);
+        // The snapshot spans multiple datagrams — so this genuinely exercised the chunked path...
+        Assert.True(reported.Count > 20, $"expected a whole-node snapshot, got {reported.Count} attributes");
+        // ...and not one of them exceeded what a real network will carry.
+        controller.AssertAllDatagramsWithinMtu();
     }
-
-    /// <summary>Drives PASE → operational CASE end to end and returns the device plus an open operational
-    /// session, so a test can exercise post-commissioning interactions without repeating the whole handshake.
-    /// Mirrors the first half of <see cref="Full_commissioning_through_the_orchestrator"/>.</summary>
-    private static (MatterDeviceNode device, Commissioner op) EstablishOperationalSession(Node node)
-    {
-        var device = new MatterDeviceNode(new MatterDeviceOptions
-        {
-            Passcode = Passcode,
-            PaseSalt = RandomNumberGenerator.GetBytes(16),
-            Attestation = new DeviceAttestationProvider(P256KeyPair.Generate(),
-                RandomNumberGenerator.GetBytes(64), RandomNumberGenerator.GetBytes(64), RandomNumberGenerator.GetBytes(128)),
-            DataModel = node,
-        });
-
-        var prover = new TestProver(Passcode);
-        var pase = new Commissioner(device);
-        var reqBytes = prover.BuildPbkdfParamRequest();
-        var pbkdfResp = pase.SendUnsecured(SecureChannelOpcode.PbkdfParamRequest, reqBytes, MatterProtocolId.SecureChannel);
-        prover.OnPbkdfParamResponse(reqBytes, pbkdfResp.Payload);
-        var devicePaseSessionId = PaseMessages.PbkdfParamResponse.Decode(pbkdfResp.Payload).ResponderSessionId;
-
-        var pake2 = pase.SendUnsecured(SecureChannelOpcode.PasePake1, prover.BuildPake1(), MatterProtocolId.SecureChannel);
-        pase.SendUnsecured(SecureChannelOpcode.PasePake3, prover.OnPake2BuildPake3(pake2.Payload), MatterProtocolId.SecureChannel);
-        var (i2r, r2i, _) = prover.SessionKeys!.Value;
-        pase.OpenSecure(devicePaseSessionId, encryptKey: i2r, decryptKey: r2i);
-
-        InvokeOpCreds(pase, 0x00, w => w.WriteBytes(TlvTag.ContextSpecific(0), RandomNumberGenerator.GetBytes(32)));  // AttestationRequest
-        var csrResponse = InvokeOpCreds(pase, 0x04, w => w.WriteBytes(TlvTag.ContextSpecific(0), RandomNumberGenerator.GetBytes(32))); // CSRRequest
-        var nocsr = OpCredsMessages.DecodeNocsrElements(ReadResponseField(csrResponse, fieldTag: 0));
-        var operationalPublicKey = P256KeyPair.PublicKeyFromCsr(nocsr.Csr);
-
-        var rootKey = P256KeyPair.Generate();
-        var root = OperationalCredentials.CreateRootCertificate(rootKey, RcacId);
-        var deviceNoc = OperationalCredentials.CreateNodeCertificate(rootKey, root, operationalPublicKey, FabricId, DeviceNodeId);
-        var ipk = RandomNumberGenerator.GetBytes(16);
-        InvokeOpCreds(pase, 0x0B, w => w.WriteBytes(TlvTag.ContextSpecific(0), root.Encode())); // AddTrustedRootCertificate
-        InvokeOpCreds(pase, 0x06, w =>                                                          // AddNOC
-        {
-            w.WriteBytes(TlvTag.ContextSpecific(0), deviceNoc.Encode());
-            w.WriteBytes(TlvTag.ContextSpecific(2), ipk);
-        });
-
-        var commissionerKey = P256KeyPair.Generate();
-        var commissionerNoc = OperationalCredentials.CreateNodeCertificate(rootKey, root, commissionerKey, FabricId, CommissionerNodeId);
-        var caseInitiator = new CaseInitiator(root, ipk, FabricId, DeviceNodeId, commissionerNoc, commissionerKey, 0xB2B2);
-        var sigma2 = pase.SendUnsecured(SecureChannelOpcode.CaseSigma1, caseInitiator.BuildSigma1(), MatterProtocolId.SecureChannel);
-        var sigma2Decoded = CaseMessages.Sigma2.Decode(sigma2.Payload);
-        pase.SendUnsecured(SecureChannelOpcode.CaseSigma3, caseInitiator.OnSigma2BuildSigma3(sigma2.Payload), MatterProtocolId.SecureChannel);
-
-        var (caseI2r, caseR2i, _) = caseInitiator.SessionKeys!.Value;
-        var op = new Commissioner(device);
-        op.OpenSecure(sigma2Decoded.ResponderSessionId, encryptKey: caseI2r, decryptKey: caseR2i, nonceNodeId: CommissionerNodeId);
-        return (device, op);
-    }
-
-    private static byte[] EncodeSubscribeRequest(ushort minIntervalFloor, ushort maxIntervalCeiling, params AttributePath[] paths)
-    {
-        var w = new TlvWriter();
-        w.StartStructure(TlvTag.Anonymous)
-            .WriteBool(TlvTag.ContextSpecific(0), false)              // KeepSubscriptions
-            .WriteUInt(TlvTag.ContextSpecific(1), minIntervalFloor)
-            .WriteUInt(TlvTag.ContextSpecific(2), maxIntervalCeiling);
-        w.StartArray(TlvTag.ContextSpecific(3));                       // AttributeRequests
-        foreach (var p in paths) p.Write(w, TlvTag.Anonymous);
-        w.EndContainer();
-        w.WriteUInt(TlvTag.ContextSpecific(ImConstants.InteractionModelRevisionTag), ImConstants.InteractionModelRevision);
-        w.EndContainer();
-        return w.ToArray();
-    }
-
-    private static byte[] EncodeEmptyStatusResponse() =>
-        new TlvWriter().StartStructure(TlvTag.Anonymous).WriteUInt(TlvTag.ContextSpecific(0), 0).EndContainer().ToArray();
 
     private static MatterMessage InvokeOpCreds(Commissioner c, uint commandId, Action<TlvWriter> writeFields)
     {

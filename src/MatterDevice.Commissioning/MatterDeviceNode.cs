@@ -27,6 +27,34 @@ public sealed class MatterDeviceOptions
     public Persistence.IFabricStore? FabricStore { get; init; }
 }
 
+/// <summary>An immutable view of one active subscription, for diagnostics.</summary>
+/// <param name="Id">The subscription id the device assigned.</param>
+/// <param name="SessionId">The local secure-session id it reports over.</param>
+/// <param name="PeerNodeId">The subscribing controller's operational node id.</param>
+/// <param name="Paths">The attribute paths being watched (a wildcard path has null components).</param>
+/// <param name="MaxIntervalSeconds">The reporting ceiling the controller asked for.</param>
+/// <param name="LastReportUtc">When a report was last sent — staleness here means reports aren't flowing.</param>
+public sealed record SubscriptionInfo(
+    uint Id,
+    ushort SessionId,
+    ulong PeerNodeId,
+    IReadOnlyList<AttributePath> Paths,
+    ushort MaxIntervalSeconds,
+    DateTime LastReportUtc);
+
+/// <summary>Why a secure session was torn down.</summary>
+public enum SessionEvictionReason
+{
+    /// <summary>No inbound traffic for the idle timeout — the peer stopped acking or went away.</summary>
+    Idle,
+
+    /// <summary>The same controller re-established CASE, so its previous session was replaced.</summary>
+    PeerReconnected,
+
+    /// <summary>The concurrent-session cap was reached; the least-recently-active was dropped.</summary>
+    CapacityExceeded,
+}
+
 /// <summary>
 /// A complete commissionable Matter node: the transport-agnostic orchestrator that sequences every layer —
 /// PASE, the encrypted Operational-Credentials commissioning (attestation → CSR → AddNOC), CASE, and the
@@ -73,14 +101,45 @@ public sealed class MatterDeviceNode
         public required IReadOnlyList<AttributePath> Paths { get; init; }
         public required ushort MaxInterval { get; init; }
         public DateTime LastReportUtc { get; set; }
+
+        public SubscriptionInfo Snapshot() => new(Id, Session.LocalSessionId, Session.PeerNodeId, Paths, MaxInterval, LastReportUtc);
     }
 
     public FabricTable Fabrics => _fabrics;
     public IReadOnlyCollection<SecureSession> Sessions => _sessions.Active;
 
+    /// <summary>
+    /// A point-in-time snapshot of the active subscriptions — what each controller is watching and when it
+    /// was last reported to. Surface this from a health/diagnostics endpoint: a controller that has silently
+    /// stopped receiving reports shows up here as a stale <see cref="SubscriptionInfo.LastReportUtc"/>, and a
+    /// controller that never subscribed shows up as nothing at all — neither is visible from session counts.
+    /// </summary>
+    public IReadOnlyList<SubscriptionInfo> Subscriptions
+    {
+        get { lock (_subGate) return _subscriptions.Select(s => s.Snapshot()).ToList(); }
+    }
+
     /// <summary>Raised when a fabric is committed via AddNOC <em>or restored from storage</em> — the host
     /// can begin operational advertising for it.</summary>
     public event Action<Fabric>? FabricCommissioned;
+
+    /// <summary>Raised when a controller completes CASE and gets an operational session.</summary>
+    public event Action<SecureSession>? SessionEstablished;
+
+    /// <summary>Raised for each session torn down, with the reason. Watch this to spot session churn: a
+    /// healthy controller holds one session, so repeated <see cref="SessionEvictionReason.Idle"/> evictions
+    /// mean it stopped acking (often because reports aren't reaching it) rather than that it went away.</summary>
+    public event Action<SecureSession, SessionEvictionReason>? SessionEvicted;
+
+    /// <summary>Raised when a controller subscribes (a re-subscribe replaces its prior subscription).</summary>
+    public event Action<SubscriptionInfo>? SubscriptionAdded;
+
+    /// <summary>Raised when a subscription is dropped because its session went away.</summary>
+    public event Action<SubscriptionInfo>? SubscriptionRemoved;
+
+    /// <summary>Raised after each subscription report is handed to the transport, with the attribute count
+    /// and how many datagrams it was split across.</summary>
+    public event Action<SubscriptionInfo, int, int>? ReportSent;
 
     /// <summary>
     /// Loads any persisted fabrics from <see cref="MatterDeviceOptions.FabricStore"/> into the live table and
@@ -118,7 +177,8 @@ public sealed class MatterDeviceNode
     /// <summary>The host calls this periodically (e.g. once a second) to emit subscription heartbeat reports.</summary>
     public async Task TickAsync(CancellationToken ct = default)
     {
-        DropSessions(_sessions.EvictIdle(SessionIdleTimeout)); // reap dead controllers + their subscriptions
+        // Reap dead controllers + their subscriptions.
+        DropSessions((SessionEvictionReason.Idle, _sessions.EvictIdle(SessionIdleTimeout)));
         foreach (var sub in SubscriptionsDue())
             await SendSubscriptionReportAsync(sub, ct).ConfigureAwait(false);
     }
@@ -188,8 +248,11 @@ public sealed class MatterDeviceNode
                 // subscriptions leak forever and the device drowns reporting to thousands of dead peers.
                 var capEvicted = _sessions.Add(opSession);
                 var replaced = _sessions.EvictPeer(opSession.PeerNodeId, opSession.LocalSessionId);
-                DropSessions(capEvicted, replaced);
+                DropSessions(
+                    (SessionEvictionReason.CapacityExceeded, capEvicted),
+                    (SessionEvictionReason.PeerReconnected, replaced));
                 _log.LogInformation("✓ CASE operational session {Id} established", opSession.LocalSessionId);
+                SessionEstablished?.Invoke(opSession);
                 return [Reply(msg, SecureChannelOpcode.StatusReport, StatusReport.SessionEstablished().Encode(), false)];
             }
             default:
@@ -386,19 +449,26 @@ public sealed class MatterDeviceNode
 
     /// <summary>Removes the subscriptions bound to a set of just-evicted sessions (a session with no home has
     /// no business still receiving reports).</summary>
-    private void DropSessions(params IReadOnlyList<SecureSession>[] evictedGroups)
+    private void DropSessions(params (SessionEvictionReason Reason, IReadOnlyList<SecureSession> Sessions)[] evictedGroups)
     {
-        var ids = evictedGroups.SelectMany(g => g).Select(s => s.LocalSessionId).ToHashSet();
+        var ids = evictedGroups.SelectMany(g => g.Sessions).Select(s => s.LocalSessionId).ToHashSet();
         if (ids.Count == 0) return;
-        int subs;
+        List<Subscription> dropped;
         lock (_subGate)
         {
-            subs = _subscriptions.RemoveAll(sub => ids.Contains(sub.Session.LocalSessionId));
+            dropped = _subscriptions.Where(sub => ids.Contains(sub.Session.LocalSessionId)).ToList();
+            _subscriptions.RemoveAll(sub => ids.Contains(sub.Session.LocalSessionId));
             // Drop any half-sent chunk queues bound to those sessions so they don't leak.
             foreach (var key in _pendingChunks.Keys.Where(k => ids.Contains(k.Session)).ToList())
                 _pendingChunks.Remove(key);
         }
-        _log.LogInformation("Evicted {Sessions} stale session(s) + {Subs} subscription(s).", ids.Count, subs);
+        _log.LogInformation("Evicted {Sessions} stale session(s) + {Subs} subscription(s).", ids.Count, dropped.Count);
+
+        foreach (var (reason, sessions) in evictedGroups)
+            foreach (var session in sessions)
+                SessionEvicted?.Invoke(session, reason);
+        foreach (var sub in dropped)
+            SubscriptionRemoved?.Invoke(sub.Snapshot());
     }
 
     private IReadOnlyList<byte[]> HandleSubscribe(MatterMessage msg, SecureSession session)
@@ -416,6 +486,7 @@ public sealed class MatterDeviceNode
             _subscriptions.Add(sub);
         }
         _log.LogInformation("← SubscribeRequest ({Paths} paths) → subscription {Id}, max {Max}s", req.Paths.Count, subId, maxInterval);
+        SubscriptionAdded?.Invoke(sub.Snapshot());
 
         // Priming ReportData (possibly chunked), then — driven by the peer's StatusResponse — the
         // SubscribeResponse, which MRP-acks that StatusResponse.
@@ -498,6 +569,7 @@ public sealed class MatterDeviceNode
         sub.LastReportUtc = DateTime.UtcNow;
         try { await SendDatagram(peer, datagram, ct).ConfigureAwait(false); }
         catch (Exception ex) { _log.LogDebug(ex, "Subscription report send failed"); }
+        ReportSent?.Invoke(sub.Snapshot(), reports.Count, chunks.Count);
     }
 
     private static bool Covers(AttributePath p, ushort endpointId, uint clusterId) =>

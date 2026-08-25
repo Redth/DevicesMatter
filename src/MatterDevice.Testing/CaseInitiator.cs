@@ -3,13 +3,13 @@ using MatterDevice.Commissioning.Case;
 using MatterDevice.Core.Credentials;
 using MatterDevice.Core.Crypto;
 
-namespace MatterDevice.Tests;
+namespace MatterDevice.Testing;
 
 /// <summary>
-/// A minimal commissioner-side CASE driver (the initiator role), used by the tests to exercise the device
+/// A minimal commissioner-side CASE driver (the initiator role), used to drive a device's
 /// <see cref="CaseResponder"/>. A real controller plays this same role on the wire.
 /// </summary>
-internal sealed class CaseInitiator
+public sealed class CaseInitiator
 {
     private readonly MatterCertificate _root;
     private readonly byte[] _operationalIpk;

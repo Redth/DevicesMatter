@@ -28,8 +28,11 @@ public sealed class ThermostatCluster : Cluster
     public ThermostatCluster() : base(ClusterId, "Thermostat")
     {
         FeatureMap = 0x01; // Heating — makes OccupiedHeatingSetpoint feature-conformant
-        LocalTemperatureCentiC = 0;
-        OccupiedHeatingSetpointCentiC = 2000; // 20.00 °C
+        // Initial values go through the silent Set: there is nothing subscribed during construction, and
+        // seeding state is not an attribute *change*. Post-construction updates use the properties below,
+        // which report (see SetAttribute).
+        Set(LocalTemperatureId, (short)0);
+        Set(OccupiedHeatingSetpointId, (short)2000); // 20.00 °C
 
         // Mandatory attributes that controllers rely on. Apple Home, in particular, only enables the
         // Off/Heat mode control — and actually writes SystemMode — when ControlSequenceOfOperation is
@@ -45,7 +48,7 @@ public sealed class ThermostatCluster : Cluster
         // really firing vs "Idle" when it's on but satisfied. Apple Home maps this to its flame indicator.
         Set(ThermostatRunningStateId, (ushort)0);
 
-        SystemMode = ThermostatSystemMode.Heat;
+        Set(SystemModeId, (byte)ThermostatSystemMode.Heat);
         // A controller may set the heating setpoint and the system mode.
         MarkWritable(OccupiedHeatingSetpointId, SystemModeId);
     }
@@ -59,24 +62,25 @@ public sealed class ThermostatCluster : Cluster
         return base.WriteAttribute(attributeId, value);
     }
 
-    /// <summary>Measured temperature in 0.01 °C units.</summary>
+    /// <summary>Measured temperature in 0.01 °C units. Setting it reports to subscribers.</summary>
     public short LocalTemperatureCentiC
     {
         get => (short)(Get(LocalTemperatureId) ?? (short)0);
-        set => Set(LocalTemperatureId, value);
+        set => SetAttribute(LocalTemperatureId, value);
     }
 
-    /// <summary>Heating setpoint in 0.01 °C units.</summary>
+    /// <summary>Heating setpoint in 0.01 °C units. Setting it reports to subscribers.</summary>
     public short OccupiedHeatingSetpointCentiC
     {
         get => (short)(Get(OccupiedHeatingSetpointId) ?? (short)0);
-        set => Set(OccupiedHeatingSetpointId, value);
+        set => SetAttribute(OccupiedHeatingSetpointId, value);
     }
 
+    /// <summary>Off / Heat (etc). Setting it reports to subscribers.</summary>
     public ThermostatSystemMode SystemMode
     {
         get => (ThermostatSystemMode)(byte)(Get(SystemModeId) ?? (byte)0);
-        set => Set(SystemModeId, (byte)value);
+        set => SetAttribute(SystemModeId, (byte)value);
     }
 
     /// <summary>ThermostatRunningState bit for "heat is actively running" (§4.3.9.x).</summary>

@@ -104,7 +104,17 @@ public abstract class Cluster(uint id, string name)
     /// <summary>Raised when an attribute value changes (carries the changed attribute id).</summary>
     public event Action<Cluster, uint>? AttributeChanged;
 
-    /// <summary>Sets an attribute's initial value (no change event; for construction).</summary>
+    /// <summary>
+    /// Sets an attribute's initial value <b>silently</b> — no <see cref="DataVersion"/> bump, no
+    /// <see cref="AttributeChanged"/>, so nothing is reported to subscribers.
+    /// <para>
+    /// Use this <b>only</b> from a cluster constructor to seed state. Any post-construction mutation —
+    /// including every public property setter that models live device state — must go through
+    /// <see cref="SetAttribute"/>. A property whose setter calls this instead will appear to work (the
+    /// value stores, reads and reports back correctly) while never notifying a subscribed controller, so
+    /// the ecosystem silently shows stale state.
+    /// </para>
+    /// </summary>
     protected void Set(uint attributeId, object? value) => _attributes[attributeId] = value;
 
     /// <summary>Marks an attribute writable by a controller (WriteRequest).</summary>

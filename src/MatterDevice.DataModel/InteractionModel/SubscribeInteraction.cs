@@ -17,6 +17,7 @@ public static class SubscribeInteraction
     private const int TagMinIntervalFloor = 1;
     private const int TagMaxIntervalCeiling = 2;
     private const int TagAttributeRequests = 3;
+    private const int TagIsFabricFiltered = 4;
 
     // SubscribeResponseMessage tags
     private const int TagSubscriptionId = 0;
@@ -43,6 +44,38 @@ public static class SubscribeInteraction
             }
         });
         return new SubscribeRequest(minFloor, maxCeiling, paths, keep);
+    }
+
+    /// <summary>
+    /// Encodes a SubscribeRequest — the controller side of the exchange. The device itself never sends one;
+    /// this exists so you can drive your own device from a test/controller harness (pair it with
+    /// <see cref="StatusResponseInteraction"/> to ack the reports that come back).
+    /// </summary>
+    /// <param name="paths">Attribute paths to watch. Leave components null to wildcard, e.g.
+    /// <c>new AttributePath(null, null, null)</c> subscribes to the whole node the way Apple Home does.</param>
+    /// <param name="minIntervalFloor">Fastest reporting rate the controller will accept, in seconds.</param>
+    /// <param name="maxIntervalCeiling">Slowest acceptable gap between reports, in seconds.</param>
+    /// <param name="keepSubscriptions">Whether the device should keep this peer's existing subscriptions.</param>
+    /// <param name="isFabricFiltered">Whether to return only fabric-scoped data visible to this fabric.</param>
+    public static byte[] EncodeRequest(
+        IReadOnlyList<AttributePath> paths,
+        ushort minIntervalFloor = 0,
+        ushort maxIntervalCeiling = 60,
+        bool keepSubscriptions = false,
+        bool isFabricFiltered = true)
+    {
+        var w = new TlvWriter();
+        w.StartStructure(TlvTag.Anonymous)
+            .WriteBool(TlvTag.ContextSpecific(TagKeepSubscriptions), keepSubscriptions)
+            .WriteUInt(TlvTag.ContextSpecific(TagMinIntervalFloor), minIntervalFloor)
+            .WriteUInt(TlvTag.ContextSpecific(TagMaxIntervalCeiling), maxIntervalCeiling);
+        w.StartArray(TlvTag.ContextSpecific(TagAttributeRequests));
+        foreach (var path in paths) path.Write(w, TlvTag.Anonymous);
+        w.EndContainer();
+        w.WriteBool(TlvTag.ContextSpecific(TagIsFabricFiltered), isFabricFiltered);
+        w.WriteUInt(TlvTag.ContextSpecific(ImConstants.InteractionModelRevisionTag), ImConstants.InteractionModelRevision);
+        w.EndContainer();
+        return w.ToArray();
     }
 
     public static byte[] EncodeResponse(uint subscriptionId, ushort maxInterval)
