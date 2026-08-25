@@ -35,9 +35,29 @@ messages, then reads the thermostat over the operational CASE session.
 ## Build / test / run
 
 ```bash
-dotnet test                                   # 44 tests across every layer (SPAKE2+/CASE/AES-CCM KATs, full commissioning)
+dotnet test                                   # tests across every layer (SPAKE2+/CASE/AES-CCM KATs, full commissioning)
 dotnet run --project samples/ThermostatNode   # a full commissionable device (Ctrl+C to stop)
 ```
+
+## Building on this
+
+- [`docs/02-building-devices.md`](docs/02-building-devices.md) — the shape of a device and how to write a cluster.
+- **`MatterDevice.Testing`** — commissions your node in-process and drives it like a real controller, so a
+  test can assert what the ecosystem would actually observe:
+
+  ```csharp
+  var controller = MatterTestController.Commission(MatterTestDevice.Create(node));
+  controller.Subscribe([new AttributePath(null, null, null)]);
+  thermostat.LocalTemperatureCentiC = 2650;
+  var reported = await controller.ReceiveReportAsync();   // acks each chunk, reassembles
+  ```
+
+- **The one rule to internalise:** a cluster property that models live state must write via `SetAttribute`,
+  never the silent `Set` — otherwise it stores and reads back correctly while never reaching a subscribed
+  controller. `Set` is for constructor seeding only.
+- If you use Claude Code, [`.claude/skills/matterdevice-net`](.claude/skills/matterdevice-net/SKILL.md)
+  loads this guidance plus the ecosystem quirks (Apple Home wildcard subscriptions, chunking/MTU, thermostat
+  running state) and a diagnosing guide.
 
 ## Why this exists
 
